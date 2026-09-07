@@ -7,8 +7,21 @@
 1. The listing exists. The deployed `NotaReceiptStore` enforces this and reverts before returning a nonexistent listing.
 2. The caller is the listing seller returned by that store.
 3. The deployed store reconstructs the purchase reference from the seller, listing ID, raw purchase reference, and nonce.
-4. The deployed `PurchaseRefRegistry` reports that the reconstructed reference was consumed specifically by the configured `NotaReceiptStore`.
+4. The deployed `PurchaseRefRegistry` reports that the reconstructed reference was consumed by one of this contract's accepted settlement modules.
 5. The purchase reference has not already been redeemed through this entitlement contract.
+
+### Redemption trusts a set of settlement modules
+
+`PurchaseRefRegistry.consume` attributes a reference to the module that called it. A purchase settled directly through `NotaReceiptStore` records the store; one settled through `NotaX402Settlement` records the adapter. Redemption therefore accepts a **set** of Nota settlement modules, not a single contract.
+
+State that plainly rather than describing it as one contract: anything in that set can cause a reference to count as paid. The set is `STORE` plus whatever `additionalConsumers` the deployment was constructed with, and it is enumerable on-chain through `acceptedConsumers()`.
+
+What holds the boundary is that each accepted module is itself constrained. `NotaX402Settlement` validates every quote through the store's own `validateSignedReceiptPurchase`, cannot consume a reference at all until the registry owner authorizes it, and is revocable by that owner at any time. Accepting a module that did not validate through the store, or that was not registry-authorized, would widen this materially — the registry owner's authorization list is the real gate, and this contract's set is a subset of it.
+
+The set is fixed at construction, so this contract keeps its no-owner property and nobody can widen the trust boundary after deployment. Two consequences follow:
+
+- Adding a settlement module means deploying a new `EntitlementRedemption` with the longer list. That is a configuration change, not a source change.
+- **A redeployment starts with empty redemption state.** `redeemedAt` lives in this contract, so an entitlement already redeemed against an older deployment can be redeemed again against a newer one. Redeploying to widen the set is not free; a migration must account for already-redeemed references, and consumers must treat the redemption contract address as part of the entitlement's identity.
 
 The purchase-reference preimage includes the seller, so a purchase reference is globally unique. Redemption state is therefore keyed directly by `purchaseRef`.
 
@@ -58,7 +71,9 @@ Deriving one from the other would leak the redemption credential to anyone watch
 
 The adapter does not identify or authenticate the buyer's agent. A valid buyer authorization proves control of the buyer key at signing time and nothing more.
 
-`buyerSignature` is a 65-byte ECDSA signature, split and handed to the token, which applies the EIP-2 low-`s` and `v` rules and rejects a recovered address that is not the authorizer. **The buyer must therefore be an EOA.** The deployed USDC also exposes a `bytes`-signature overload of `receiveWithAuthorization` that accepts ERC-1271 contract-wallet signatures; the adapter does not use it. A smart-contract buyer wallet — including a Coinbase Smart Wallet — cannot pay through this adapter as written. Seller signatures are unaffected: the store verifies those with `SignatureChecker` and accepts ERC-1271.
+`buyerSignature` is passed to the token unmodified, using the `bytes`-signature overload of `receiveWithAuthorization`. FiatTokenV2_2 validates it with `SignatureChecker`, so both EOA ECDSA signatures and ERC-1271 contract-wallet signatures are accepted and a smart-wallet buyer — an AgentKit wallet or a Coinbase Smart Wallet — can pay. The adapter deliberately does not use the `(v, r, s)` overload, which is ECDSA-only. The token is the single rejection point for the buyer signature, matching how the store delegates seller signatures to `SignatureChecker`.
+
+An ERC-1271 wallet decides for itself what signature it honours, so a valid buyer authorization proves whatever that wallet's own policy proves, and nothing more.
 
 The adapter has no owner, no pause switch, and no upgrade path, and holds no funds between transactions. It cannot recover tokens sent to it directly.
 
@@ -66,11 +81,9 @@ The adapter has no owner, no pause switch, and no upgrade path, and holds no fun
 
 Settlement consumes a purchase reference, which only registry-owner-authorized modules may do. The registry owner must call `setConsumerAuthorization(<adapter address>, true)` before the adapter can settle anything; until then every call reverts with `UnauthorizedConsumer`. That authorization is also a revocation point: the registry owner can disable the adapter at any time without the adapter having a pause switch of its own.
 
-### Adapter settlements are not redeemable through `EntitlementRedemption`
+### Redemption depends on deploy-time configuration
 
-`PurchaseRefRegistry.consume` attributes a reference to the calling module. A reference settled through the adapter is recorded as consumed by the adapter, not by the store, and `EntitlementRedemption` requires `consumedBy(purchaseRef) == address(STORE)`. Purchases settled through x402 are therefore rejected with `EntitlementNotPaid`.
-
-This is a known gap, not a defended boundary. It is left open deliberately: `EntitlementRedemption` is already deployed-behaviour-compatible and is not modified here. Whichever way day three closes it — accepting a set of authorized consumers, or deploying a separate redemption contract for adapter settlements — the choice widens who can mint an entitlement and needs to be made explicitly rather than patched in.
+An adapter settlement is redeemable only through an `EntitlementRedemption` that was constructed with that adapter in its accepted set. Deploy the adapter first and pass its address to the redemption deployment; a redemption contract deployed without it rejects every x402 purchase with `EntitlementNotPaid`, permanently, because the set cannot be changed afterwards. `test_AdapterSettlementIsNotRedeemableWhenAdapterIsNotAccepted` pins that failure mode.
 
 ## Administration and funds
 

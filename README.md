@@ -2,9 +2,11 @@
 
 Nota Entitlements adds two things over Nota's deployed Base-mainnet protocol: one-time entitlement redemption, and an x402 settlement adapter that lets a buyer pay a signed quote with an EIP-3009 authorization. Neither contract has an owner, a pause switch, or an upgrade path, and neither holds funds between transactions.
 
-**On-chain security property:** redemption requires a purchase reference consumed by the configured Nota store, can happen only once, and must be submitted by the listing seller.
+**On-chain security property:** redemption requires a purchase reference consumed by one of the accepted Nota settlement modules, can happen only once, and must be submitted by the listing seller.
 
-`EntitlementRedemption` asks the deployed `NotaReceiptStore` to reconstruct the purchase-reference hash from the listing seller, listing ID, raw reference, and nonce. It then verifies with the deployed `PurchaseRefRegistry` that the configured store consumed the reference and records that purchase reference exactly once.
+`EntitlementRedemption` asks the deployed `NotaReceiptStore` to reconstruct the purchase-reference hash from the listing seller, listing ID, raw reference, and nonce. It then verifies with the deployed `PurchaseRefRegistry` that an accepted settlement module consumed the reference and records that purchase reference exactly once.
+
+The registry attributes a consumption to the module that called it, so a direct store purchase records the store and an x402 purchase records the adapter. Redemption therefore accepts a set of settlement modules — `STORE` plus a constructor list, readable on-chain through `acceptedConsumers()` — rather than a single contract. The set is fixed at construction, so the contract keeps its no-owner property; adding a module later is a new deployment with a longer list, not a source change.
 
 `listingId` is used to resolve and validate the seller, but it is not independently committed into `purchaseRef`. The redemption event therefore omits it. Indexers can join `EntitlementRedeemed` to the original `ReceiptPurchasedV2` event by `purchaseRef` to recover the authoritative listing.
 
@@ -64,9 +66,19 @@ That is an owner transaction on the deployed mainnet registry, not something thi
 forge script script/DeployNotaX402Settlement.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
 ```
 
-### Entitlement redemption does not yet cover adapter settlements
+### Deploy order
 
-`PurchaseRefRegistry.consume` records the calling module as the consumer, so a reference settled through the adapter is attributed to the adapter, not to the store. `EntitlementRedemption` requires `consumedBy(purchaseRef) == address(STORE)` and therefore rejects it with `EntitlementNotPaid`. Purchases settled through x402 cannot currently be redeemed through the day-one entitlement contract. Closing that gap is a day-three decision and is deliberately not patched into the deployed-behaviour-compatible `EntitlementRedemption`; see [`SECURITY.md`](./SECURITY.md).
+The adapter must exist before the redemption contract that accepts it, and the accepted set cannot be changed afterwards:
+
+```sh
+forge script script/DeployNotaX402Settlement.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
+# then have the registry owner run the setConsumerAuthorization call printed above
+
+ENTITLEMENT_ACCEPTED_CONSUMERS=<adapter address> \
+  forge script script/DeployEntitlementRedemption.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
+```
+
+A redemption contract deployed without the adapter in its list rejects every x402 purchase with `EntitlementNotPaid`, permanently. See [`SECURITY.md`](./SECURITY.md) for what that trust set means and what a later redeployment costs.
 
 ## Development
 
