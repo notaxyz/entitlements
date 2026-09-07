@@ -18,6 +18,10 @@ Before this event, Nota already supported a seller-signed EIP-712 quote flowing 
 
 ## New work in this repository
 
-This repository adds an entitlement layer over the deployed Nota contracts. It reconstructs a paid purchase reference through the deployed `NotaReceiptStore`, verifies that the deployed registry consumed it, authorizes redemption by the listing seller, and records one redemption for that globally unique purchase reference.
+This repository adds two layers over the deployed Nota contracts.
 
-The entitlement contract, its minimal deployed-ABI interfaces, Base-mainnet fork tests, and supporting documentation are new ETHOnline 2026 work.
+The first is an entitlement layer. It reconstructs a paid purchase reference through the deployed `NotaReceiptStore`, verifies that the deployed registry consumed it, authorizes redemption by the listing seller, and records one redemption for that globally unique purchase reference.
+
+The second is an x402 settlement adapter. It lets a buyer pay a seller-signed Nota quote with an EIP-3009 authorization instead of an `approve` + `transferFrom`, so a facilitator can submit the settlement and the buyer needs no ETH. It delegates validation and fee math to the deployed store's `validateSignedReceiptPurchase` and consumes the quote's purchase reference through the deployed registry.
+
+Both contracts, their minimal deployed-ABI interfaces, Base-mainnet fork tests, the deployment script, and supporting documentation are new ETHOnline 2026 work.
