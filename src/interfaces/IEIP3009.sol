@@ -24,6 +24,8 @@ interface IEIP3009 {
 
     function RECEIVE_WITH_AUTHORIZATION_TYPEHASH() external view returns (bytes32);
 
+    function DOMAIN_SEPARATOR() external view returns (bytes32);
+
     function name() external view returns (string memory);
 
     function version() external view returns (string memory);

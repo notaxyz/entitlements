@@ -25,6 +25,9 @@ interface INotaSignedQuoteStore is INotaReceiptStore {
 
     function SETTLEMENT_TOKEN() external view returns (address);
 
+    /// @notice The store's own receipt counter. Unrelated to any adapter's receipt id space.
+    function nextReceiptId() external view returns (uint256);
+
     function SIGNED_RECEIPT_QUOTE_TYPEHASH() external view returns (bytes32);
 
     function MAX_PROTOCOL_FEE_BPS() external view returns (uint16);
