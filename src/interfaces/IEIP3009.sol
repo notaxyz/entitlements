@@ -8,6 +8,11 @@ interface IEIP3009 {
     /// @dev The token requires `msg.sender == to`, so only the named recipient can submit the
     ///      authorization. That is what makes an authorization safe to hand to a facilitator:
     ///      nobody else can execute the transfer standalone.
+    ///
+    ///      This is the `bytes` overload. FiatTokenV2_2 validates it with `SignatureChecker`, so
+    ///      it accepts both EOA ECDSA signatures and ERC-1271 contract-wallet signatures. The
+    ///      `(v, r, s)` overload the token also exposes is ECDSA-only and is deliberately not
+    ///      used here: a smart-wallet buyer could not pay through it.
     function receiveWithAuthorization(
         address from,
         address to,
@@ -15,9 +20,7 @@ interface IEIP3009 {
         uint256 validAfter,
         uint256 validBefore,
         bytes32 nonce,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
+        bytes calldata signature
     ) external;
 
     function authorizationState(address authorizer, bytes32 nonce) external view returns (bool);

@@ -5,6 +5,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { NotaX402Settlement } from "../src/NotaX402Settlement.sol";
+import { MockERC1271Wallet } from "./mocks/MockERC1271Wallet.sol";
 import { IEIP3009 } from "../src/interfaces/IEIP3009.sol";
 import { INotaReceiptStore } from "../src/interfaces/INotaReceiptStore.sol";
 import { INotaSignedQuoteStore } from "../src/interfaces/INotaSignedQuoteStore.sol";
@@ -272,16 +273,64 @@ contract NotaX402SettlementForkTest is Test {
         );
     }
 
-    function test_RevertsForMalformedBuyerSignature() public {
-        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("short-signature");
+    function test_RevertsWhenTokenRejectsTheBuyerSignature() public {
+        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("bad-buyer-signature");
         NotaX402Settlement.ReceiveAuthorization memory authorization = _defaultAuthorization(quote);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(NotaX402Settlement.InvalidBuyerSignatureLength.selector, 64)
-        );
+        // The adapter does not pre-validate the signature; the token is the single rejection
+        // point, exactly as the store delegates seller signatures to SignatureChecker.
+        vm.expectRevert(bytes("ECRecover: invalid signature length"));
         vm.prank(submitter);
         adapter.settleWithAuthorization(
             quote, _signQuote(quote), address(0), authorization, new bytes(64)
+        );
+    }
+
+    /// @dev The buyer is an ERC-1271 contract wallet, not an EOA. Day four's AgentKit buyer may
+    ///      be a Coinbase Smart Wallet, so the adapter uses the token's `bytes`-signature
+    ///      overload rather than the ECDSA-only `(v, r, s)` one.
+    function test_SmartContractWalletBuyerCanPay() public {
+        (address walletOwner, uint256 walletOwnerKey) = makeAddrAndKey("x402-smart-wallet-owner");
+        address wallet = address(new MockERC1271Wallet(walletOwner));
+        deal(USDC, wallet, BUYER_FUNDING);
+
+        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("erc1271-buyer");
+        quote.buyer = wallet;
+
+        NotaX402Settlement.ReceiveAuthorization memory authorization = _defaultAuthorization(quote);
+        assertEq(authorization.from, wallet);
+
+        uint256 sellerBefore = IERC20(USDC).balanceOf(seller);
+
+        vm.prank(submitter);
+        adapter.settleWithAuthorization(
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorizationWith(authorization, walletOwnerKey)
+        );
+
+        assertEq(IERC20(USDC).balanceOf(wallet), BUYER_FUNDING - AMOUNT, "wallet not debited");
+        assertEq(IERC20(USDC).balanceOf(seller), sellerBefore + AMOUNT, "seller not paid");
+        assertTrue(registry.isConsumed(quote.purchaseRef));
+    }
+
+    function test_RevertsWhenSmartWalletDisownsTheSignature() public {
+        (address walletOwner,) = makeAddrAndKey("x402-other-wallet-owner");
+        address wallet = address(new MockERC1271Wallet(walletOwner));
+        deal(USDC, wallet, BUYER_FUNDING);
+
+        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("erc1271-wrong-signer");
+        quote.buyer = wallet;
+
+        NotaX402Settlement.ReceiveAuthorization memory authorization = _defaultAuthorization(quote);
+
+        // Signed by the ordinary buyer key, which this wallet does not recognise.
+        vm.expectRevert(bytes("FiatTokenV2: invalid signature"));
+        vm.prank(submitter);
+        adapter.settleWithAuthorization(
+            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
         );
     }
 

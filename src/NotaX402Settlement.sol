@@ -64,7 +64,6 @@ contract NotaX402Settlement is ReentrancyGuard {
     error AuthorizationPayerMismatch(address authorizationFrom, address quoteBuyer);
     error AuthorizationRecipientMismatch(address authorizationTo, address adapter);
     error AuthorizationValueMismatch(uint256 authorizationValue, uint256 quoteAmount);
-    error InvalidBuyerSignatureLength(uint256 length);
     error SettlementAccountingMismatch();
 
     /// @notice Emitted once per successful x402 settlement.
@@ -112,7 +111,8 @@ contract NotaX402Settlement is ReentrancyGuard {
     /// @param claimedSigner Address asserted to have produced `sellerSignature`; zero means the
     ///        listing seller.
     /// @param authorization Buyer's `ReceiveWithAuthorization` payload, bound to this adapter.
-    /// @param buyerSignature 65-byte ECDSA signature over `authorization`, validated by the token.
+    /// @param buyerSignature Signature over `authorization`, validated by the token. EOA or
+    ///        ERC-1271, so a smart-wallet buyer can pay.
     /// @return receiptId Identifier in this adapter's own id space. See `nextAdapterReceiptId`.
     function settleWithAuthorization(
         INotaReceiptStore.SignedReceiptQuote calldata quote,
@@ -159,23 +159,19 @@ contract NotaX402Settlement is ReentrancyGuard {
         // `msg.sender == to`, so this signed authorization is only executable through this
         // adapter. A front-runner who observes it cannot move the buyer's funds on its own.
         //
-        // Scoped so `v`, `r` and `s` do not stay live across the rest of the function.
-        {
-            (uint8 v, bytes32 r, bytes32 s) = _splitBuyerSignature(buyerSignature);
-
-            IEIP3009(address(SETTLEMENT_TOKEN))
-                .receiveWithAuthorization(
-                    authorization.from,
-                    authorization.to,
-                    authorization.value,
-                    authorization.validAfter,
-                    authorization.validBefore,
-                    authorization.nonce,
-                    v,
-                    r,
-                    s
-                );
-        }
+        // The `bytes` overload, not the `(v, r, s)` one: the token validates it with
+        // `SignatureChecker`, so an ERC-1271 smart-wallet buyer can pay. The store already
+        // accepts ERC-1271 seller signatures; an ECDSA-only buyer path would undo that.
+        IEIP3009(address(SETTLEMENT_TOKEN))
+            .receiveWithAuthorization(
+                authorization.from,
+                authorization.to,
+                authorization.value,
+                authorization.validAfter,
+                authorization.validBefore,
+                authorization.nonce,
+                buyerSignature
+            );
 
         // Mirrors `_settleReceiptPurchase`: funds in, then consume, then distribute. Consuming
         // after the pull means a settlement that cannot be paid never burns the reference, and
@@ -219,20 +215,5 @@ contract NotaX402Settlement is ReentrancyGuard {
         if (validation.sellerNet > 0) {
             SETTLEMENT_TOKEN.safeTransfer(validation.seller, validation.sellerNet);
         }
-    }
-
-    /// @dev Splits a 65-byte signature without validating `v`, `r`, or `s`. The token applies the
-    ///      EIP-2 low-`s` and `v in {27,28}` rules and rejects a recovered address that is not the
-    ///      authorizer, so duplicating those checks here would only add a second thing to drift.
-    function _splitBuyerSignature(bytes calldata signature)
-        private
-        pure
-        returns (uint8 v, bytes32 r, bytes32 s)
-    {
-        if (signature.length != 65) revert InvalidBuyerSignatureLength(signature.length);
-
-        r = bytes32(signature[0:32]);
-        s = bytes32(signature[32:64]);
-        v = uint8(signature[64]);
     }
 }
