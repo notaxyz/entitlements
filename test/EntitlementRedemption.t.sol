@@ -15,6 +15,7 @@ contract EntitlementRedemptionTest is Test {
     EntitlementRedemption internal redemption;
 
     address internal seller;
+    address internal adapter;
     string internal rawPurchaseRef;
     bytes32 internal nonce;
     bytes32 internal purchaseRef;
@@ -32,7 +33,11 @@ contract EntitlementRedemptionTest is Test {
         store = new MockNotaReceiptStore(address(registry));
         store.setListing(LISTING_ID, seller);
 
-        redemption = new EntitlementRedemption(address(store));
+        adapter = makeAddr("authorized-settlement-adapter");
+
+        address[] memory additionalConsumers = new address[](1);
+        additionalConsumers[0] = adapter;
+        redemption = new EntitlementRedemption(address(store), additionalConsumers);
         purchaseRef = store.hashPurchaseRef(seller, LISTING_ID, rawPurchaseRef, nonce);
         registry.setConsumedBy(purchaseRef, address(store));
 
@@ -48,8 +53,48 @@ contract EntitlementRedemptionTest is Test {
         assertEq(uint256(redemption.redeemedAt(purchaseRef)), block.timestamp);
     }
 
-    function test_ReferenceConsumedByAnotherModuleFails() public {
-        registry.setConsumedBy(purchaseRef, makeAddr("other-authorized-module"));
+    function test_AcceptedConsumerSetIsStoreAndAdditionalModules() public view {
+        address[] memory accepted = redemption.acceptedConsumers();
+
+        assertEq(accepted.length, 2);
+        assertEq(accepted[0], address(store));
+        assertEq(accepted[1], adapter);
+        assertTrue(redemption.isAcceptedConsumer(address(store)));
+        assertTrue(redemption.isAcceptedConsumer(adapter));
+        assertFalse(redemption.isAcceptedConsumer(address(0)));
+    }
+
+    function test_ReferenceConsumedByAcceptedAdapterSucceeds() public {
+        registry.setConsumedBy(purchaseRef, adapter);
+
+        vm.prank(seller);
+        bytes32 redeemedPurchaseRef =
+            redemption.redeemEntitlement(LISTING_ID, rawPurchaseRef, nonce);
+
+        assertEq(redeemedPurchaseRef, purchaseRef);
+        assertEq(uint256(redemption.redeemedAt(purchaseRef)), block.timestamp);
+    }
+
+    function test_ConstructorRejectsZeroConsumer() public {
+        address[] memory additionalConsumers = new address[](1);
+        additionalConsumers[0] = address(0);
+
+        vm.expectRevert(EntitlementRedemption.InvalidConsumer.selector);
+        new EntitlementRedemption(address(store), additionalConsumers);
+    }
+
+    function test_ConstructorRejectsDuplicateConsumer() public {
+        address[] memory additionalConsumers = new address[](1);
+        additionalConsumers[0] = address(store);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(EntitlementRedemption.DuplicateConsumer.selector, address(store))
+        );
+        new EntitlementRedemption(address(store), additionalConsumers);
+    }
+
+    function test_ReferenceConsumedByAnUnacceptedModuleFails() public {
+        registry.setConsumedBy(purchaseRef, makeAddr("unaccepted-module"));
 
         vm.expectRevert(
             abi.encodeWithSelector(EntitlementRedemption.EntitlementNotPaid.selector, purchaseRef)

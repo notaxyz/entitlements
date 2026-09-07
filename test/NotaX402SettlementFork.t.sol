@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { EntitlementRedemption } from "../src/EntitlementRedemption.sol";
 import { NotaX402Settlement } from "../src/NotaX402Settlement.sol";
 import { MockERC1271Wallet } from "./mocks/MockERC1271Wallet.sol";
 import { IEIP3009 } from "../src/interfaces/IEIP3009.sol";
@@ -196,6 +197,76 @@ contract NotaX402SettlementForkTest is Test {
             // protocol leg is skipped. Paying it unconditionally would transfer to address(0).
             assertEq(validation.protocolFeeRecipient, address(0));
         }
+    }
+
+    /// @dev The whole ETHOnline path in one test: seller quotes, buyer authorizes, a facilitator
+    ///      settles through the adapter, and the seller then redeems the entitlement. This is the
+    ///      case that used to fail: the registry attributes consumption to the adapter, so a
+    ///      redemption contract that accepted only the store rejected every x402 purchase.
+    function test_AdapterSettlementIsRedeemable() public {
+        address[] memory additionalConsumers = new address[](1);
+        additionalConsumers[0] = address(adapter);
+        EntitlementRedemption redemption =
+            new EntitlementRedemption(NOTA_RECEIPT_STORE, additionalConsumers);
+
+        assertTrue(redemption.isAcceptedConsumer(address(adapter)));
+        assertTrue(redemption.isAcceptedConsumer(NOTA_RECEIPT_STORE));
+
+        // The redemption preimage bundle. `purchaseRefNonce` is generated independently of the
+        // EIP-3009 authorization nonce and never reaches the adapter or any settlement calldata.
+        string memory rawPurchaseRef = "nota_x402_demo_order_1";
+        bytes32 purchaseRefNonce = keccak256("independently-generated-redemption-nonce");
+
+        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("redeemable");
+        quote.purchaseRef =
+            store.hashPurchaseRef(seller, listingId, rawPurchaseRef, purchaseRefNonce);
+
+        _settle(quote);
+
+        assertEq(
+            registry.consumedBy(quote.purchaseRef),
+            address(adapter),
+            "the adapter, not the store, is recorded as the consumer"
+        );
+
+        vm.prank(seller);
+        bytes32 redeemed = redemption.redeemEntitlement(listingId, rawPurchaseRef, purchaseRefNonce);
+
+        assertEq(redeemed, quote.purchaseRef);
+        assertEq(uint256(redemption.redeemedAt(quote.purchaseRef)), block.timestamp);
+
+        // Still exactly once.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                EntitlementRedemption.EntitlementAlreadyRedeemed.selector, quote.purchaseRef
+            )
+        );
+        vm.prank(seller);
+        redemption.redeemEntitlement(listingId, rawPurchaseRef, purchaseRefNonce);
+    }
+
+    /// @dev A redemption contract that does not accept the adapter still rejects its settlements.
+    ///      Pins the deploy-time configuration as the thing that matters.
+    function test_AdapterSettlementIsNotRedeemableWhenAdapterIsNotAccepted() public {
+        EntitlementRedemption redemption =
+            new EntitlementRedemption(NOTA_RECEIPT_STORE, new address[](0));
+
+        string memory rawPurchaseRef = "nota_x402_unaccepted_order";
+        bytes32 purchaseRefNonce = keccak256("unaccepted-adapter-nonce");
+
+        INotaReceiptStore.SignedReceiptQuote memory quote = _defaultQuote("not-redeemable");
+        quote.purchaseRef =
+            store.hashPurchaseRef(seller, listingId, rawPurchaseRef, purchaseRefNonce);
+
+        _settle(quote);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                EntitlementRedemption.EntitlementNotPaid.selector, quote.purchaseRef
+            )
+        );
+        vm.prank(seller);
+        redemption.redeemEntitlement(listingId, rawPurchaseRef, purchaseRefNonce);
     }
 
     // -------------------------------------------------------------------------

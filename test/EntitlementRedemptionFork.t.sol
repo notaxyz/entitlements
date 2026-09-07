@@ -34,7 +34,7 @@ contract EntitlementRedemptionForkTest is Test {
 
         store = INotaReceiptStore(NOTA_RECEIPT_STORE);
         registry = IPurchaseRefRegistry(PURCHASE_REF_REGISTRY);
-        redemption = new EntitlementRedemption(NOTA_RECEIPT_STORE);
+        redemption = new EntitlementRedemption(NOTA_RECEIPT_STORE, new address[](0));
         seller = store.getListing(LISTING_ID).seller;
 
         assertTrue(seller != address(0), "listing 1 must exist");
