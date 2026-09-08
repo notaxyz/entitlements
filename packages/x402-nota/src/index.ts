@@ -1,5 +1,6 @@
 export * from "./abi.js";
 export * from "./addresses.js";
+export * from "./chain.js";
 export * from "./extension.js";
 export * from "./jcs.js";
 export * from "./metadata.js";
