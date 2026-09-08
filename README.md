@@ -43,6 +43,16 @@ Two behaviours are the adapter's own rather than the store's:
 - **Unbound quotes are rejected.** The store treats `quote.buyer == address(0)` as "any wallet may pay" and skips its buyer check entirely. An EIP-3009 authorization must name one payer, so the adapter requires a bound quote.
 - **`purchasesPaused` is checked directly.** It is the only check `purchaseSignedReceipt` performs that `validateSignedReceiptPurchase` does not repeat. The adapter checks it so the store owner's kill switch still covers this settlement path.
 
+### Relationship to the x402 Signed Offers & Receipts extension
+
+x402 already has a Signed Offers & Receipts extension. Nota does not replace it, and the two compose.
+
+The extension returns a **server-signed offer and delivery receipt, off-chain, after a successful response**. It attests that a particular server made a particular offer and delivered against it.
+
+A Nota receipt is an **on-chain record bound to settlement**. Its purchase reference is consumed exactly once globally in `PurchaseRefRegistry`, and the purchase it represents can be redeemed exactly once through `EntitlementRedemption`.
+
+Different artifacts, different jobs: the extension attests to delivery, Nota attests to payment and gives the resulting entitlement a single, globally enforced use. A server can issue both for the same request. Redemption is submitted by the listing seller and the buyer-agent binding is merchant-side policy rather than an on-chain check — see [`SECURITY.md`](./SECURITY.md).
+
 The adapter calls `receiveWithAuthorization`, never `transferWithAuthorization`. The token requires `msg.sender == to`, so a signed authorization naming this adapter is executable only through this adapter; an observer who sees it in the mempool cannot execute the transfer standalone.
 
 ### Adapter receipt ids are not store receipt ids
