@@ -6,10 +6,10 @@ import {
   NOTA_EXTENSION_KIND,
   notaChain,
   notaReceiptStoreAbi,
-  notaX402SettlementAbi,
   purchaseRefRegistryAbi,
   quoteToWire,
   signQuote,
+  x402ReceiptSettledEvent,
   type CheckoutMetadata,
   type NotaExtension,
   type PaymentRequiredResponse,
@@ -155,7 +155,11 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       args: [seller.address, config.listingId, rawPurchaseRef, purchaseRefNonce],
     });
 
-    const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+    // The store checks `issuedAt <= block.timestamp`, so the quote is stamped from chain time
+    // rather than wall clock. A block is always at or behind the wall clock, and stamping a quote
+    // a few seconds into the chain's future makes it permanently invalid.
+    const latestBlock = await publicClient.getBlock();
+    const issuedAt = latestBlock.timestamp;
     const expiresAt = issuedAt + quoteTtl;
 
     const metadata: CheckoutMetadata = {
@@ -165,7 +169,8 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       resource,
       description: entry.description,
       currency: "USDC",
-      items: entry.items,
+      // Cloned: the catalog entry is shared across requests and the document is signed over.
+      items: entry.items.map((item) => ({ ...item })),
       totalAmount: entry.amount.toString(),
       issuedAt: new Date(Number(issuedAt) * 1000).toISOString(),
       expiresAt: new Date(Number(expiresAt) * 1000).toISOString(),
@@ -251,53 +256,39 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
     const logs = await publicClient.getLogs({
       address: config.adapter,
-      event: notaX402SettlementAbi.find(
-        (entry) => entry.type === "event" && entry.name === "X402ReceiptSettled",
-      ) as never,
+      event: x402ReceiptSettledEvent,
       fromBlock: config.fromBlock,
       toBlock: "latest",
     });
 
-    const settlement = logs.find(
-      (log) => (log as { args: { purchaseRef?: Hex } }).args?.purchaseRef === purchaseRef,
-    ) as
-      | {
-          args: {
-            receiptId: bigint;
-            seller: Address;
-            buyer: Address;
-            listingId: bigint;
-            purchaseRef: Hex;
-            amount: bigint;
-            metadataHash: Hex;
-          };
-          transactionHash: Hex;
-          blockNumber: bigint;
-        }
-      | undefined;
+    const settlement = logs.find((log) => log.args.purchaseRef === purchaseRef);
 
     if (!settlement) {
-      response.status(402).json({ error: "no settlement found on chain for that purchase reference" });
+      response
+        .status(402)
+        .json({ error: "no settlement found on chain for that purchase reference" });
       return;
     }
+
+    const settled = settlement.args;
 
     const { quote } = record;
     const problems: string[] = [];
 
-    if (!isAddressEqual(settlement.args.seller, seller.address)) {
-      problems.push(`settlement paid ${settlement.args.seller}, not this seller`);
+    if (!isAddressEqual(settled.seller!, seller.address)) {
+      problems.push(`settlement paid ${settled.seller!}, not this seller`);
     }
-    if (!isAddressEqual(settlement.args.buyer, quote.buyer)) {
-      problems.push(`settlement buyer ${settlement.args.buyer} is not the quoted buyer`);
+    if (!isAddressEqual(settled.buyer!, quote.buyer)) {
+      problems.push(`settlement buyer ${settled.buyer!} is not the quoted buyer`);
     }
-    if (settlement.args.amount !== quote.amount) {
-      problems.push(`settlement paid ${settlement.args.amount}, quote was for ${quote.amount}`);
+    if (settled.amount! !== quote.amount) {
+      problems.push(`settlement paid ${settled.amount!}, quote was for ${quote.amount}`);
     }
-    if (settlement.args.metadataHash !== quote.metadataHash) {
+    if (settled.metadataHash! !== quote.metadataHash) {
       problems.push("settlement commits to different metadata than the issued quote");
     }
-    if (settlement.args.listingId !== quote.listingId) {
-      problems.push(`settlement is for listing ${settlement.args.listingId}`);
+    if (settled.listingId! !== quote.listingId) {
+      problems.push(`settlement is for listing ${settled.listingId!}`);
     }
 
     // The event can only follow a successful consume, but reading the registry has a second
@@ -324,13 +315,13 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       resource: record.resource,
       content: entry.body,
       receipt: {
-        receiptId: settlement.args.receiptId.toString(),
+        receiptId: settled.receiptId!.toString(),
         purchaseRef,
         txHash: settlement.transactionHash,
         blockNumber: settlement.blockNumber.toString(),
-        seller: settlement.args.seller,
-        buyer: settlement.args.buyer,
-        amount: settlement.args.amount.toString(),
+        seller: settled.seller!,
+        buyer: settled.buyer!,
+        amount: settled.amount!.toString(),
       },
       // Handed over only here: after settlement, over the paid response, to the payer who funded
       // it. This is what makes the entitlement theirs to redeem. It is never in a 402 response,

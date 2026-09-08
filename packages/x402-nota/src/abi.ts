@@ -1,4 +1,4 @@
-import { parseAbi } from "viem";
+import { parseAbi, parseAbiItem } from "viem";
 
 export const notaX402SettlementAbi = parseAbi([
   "struct SignedReceiptQuote { uint256 listingId; address buyer; bytes32 purchaseRef; uint256 amount; bytes32 metadataHash; bytes32 agentId; address integratorFeeRecipient; uint256 integratorFeeAmount; uint64 issuedAt; uint64 expiresAt; }",
@@ -17,9 +17,15 @@ export const notaX402SettlementAbi = parseAbi([
   "error SettlementAccountingMismatch()",
 ]);
 
+/// Standalone item so `getLogs` returns typed args instead of a hand-cast record.
+export const x402ReceiptSettledEvent = parseAbiItem(
+  "event X402ReceiptSettled(uint256 indexed receiptId, address indexed seller, address indexed buyer, uint256 listingId, bytes32 purchaseRef, uint256 amount, bytes32 metadataHash, bytes32 agentId, bytes32 authorizationNonce)",
+);
+
 export const notaReceiptStoreAbi = parseAbi([
   "struct Listing { address seller; bytes32 listingHash; uint256 unitPrice; bool active; uint8 mode; }",
   "function createListing(bytes32 listingHash, uint256 unitPrice, uint8 mode) returns (uint256 listingId)",
+  "function nextListingId() view returns (uint256)",
   "function getListing(uint256 listingId) view returns (Listing)",
   "function hashPurchaseRef(address seller, uint256 listingId, string rawPurchaseRef, bytes32 purchaseRefNonce) view returns (bytes32)",
   "function purchasesPaused() view returns (bool)",

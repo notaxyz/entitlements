@@ -1,0 +1,324 @@
+import { createFacilitator } from "@nota/facilitator";
+import { createResourceServer } from "@nota/resource-server";
+import {
+  NOTA_RECEIPT_STORE,
+  PURCHASE_REF_REGISTRY,
+  USDC,
+  notaChain,
+  notaReceiptStoreAbi,
+  purchaseRefRegistryAbi,
+  eip3009Abi,
+} from "@nota/x402-nota";
+import { spawn, type ChildProcess } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Express } from "express";
+import {
+  createPublicClient,
+  createWalletClient,
+  encodeAbiParameters,
+  http,
+  keccak256,
+  pad,
+  toHex,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+const CHAIN_ID = 8453;
+
+/**
+ * Deterministic throwaway keys, derived from labels so runs are reproducible.
+ *
+ * The stock anvil development accounts are deliberately NOT used. Those addresses carry EIP-7702
+ * delegation code on Base mainnet, so on a fork they have a non-empty codesize. Both the store and
+ * USDC check signatures with `SignatureChecker`, which routes any address with code to ERC-1271 --
+ * so an ordinary ECDSA signature from one of them is rejected, and every settlement fails with
+ * `InvalidQuoteSigner`. `assertNoCode` below keeps that from silently coming back.
+ */
+const KEYS = {
+  relayer: keccak256(toHex("nota-x402-e2e:relayer")),
+  seller: keccak256(toHex("nota-x402-e2e:seller")),
+  buyer: keccak256(toHex("nota-x402-e2e:buyer")),
+} satisfies Record<string, Hex>;
+
+/// FiatTokenV2_2 keeps balances in `balanceAndBlacklistStates` at storage slot 9 on Base.
+const USDC_BALANCE_SLOT = 9n;
+
+export interface Fixture {
+  rpcUrl: string;
+  chainId: number;
+  adapter: Address;
+  listingId: bigint;
+  seller: Address;
+  buyer: Address;
+  buyerPrivateKey: Hex;
+  resourceUrl: string;
+  resourceBaseUrl: string;
+  facilitatorUrl: string;
+  publicClient: PublicClient;
+  usdcBalance(account: Address): Promise<bigint>;
+  stop(): Promise<void>;
+}
+
+export function baseRpcUrl(): string | undefined {
+  const url = process.env.BASE_RPC_URL;
+  return url && url.length > 0 ? url : undefined;
+}
+
+async function waitForRpc(url: string, timeoutMs = 90_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+      });
+      if (response.ok) return;
+    } catch {
+      // anvil is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`anvil did not become ready at ${url}`);
+}
+
+function listen(app: Express, port = 0): Promise<{ url: string; server: Server }> {
+  return new Promise((resolve) => {
+    const server = createServer(app).listen(port, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("expected a TCP address");
+      }
+      resolve({ url: `http://127.0.0.1:${address.port}`, server });
+    });
+  });
+}
+
+/// The resource server signs its own URL into the metadata document, so it has to know its port
+/// before it starts. Reserve one, release it, and bind it.
+function reservePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = createServer().listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("expected a TCP address");
+      }
+      const { port } = address;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
+export async function startFixture(): Promise<Fixture> {
+  const forkUrl = baseRpcUrl();
+  if (!forkUrl) throw new Error("BASE_RPC_URL is not set");
+
+  const port = 8600 + Math.floor(Math.random() * 300);
+  const rpcUrl = `http://127.0.0.1:${port}`;
+
+  const anvil: ChildProcess = spawn(
+    "anvil",
+    ["--fork-url", forkUrl, "--port", String(port), "--silent", "--chain-id", String(CHAIN_ID)],
+    { stdio: "ignore" },
+  );
+
+  await waitForRpc(rpcUrl);
+
+  const chain = notaChain(CHAIN_ID, rpcUrl);
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+  const relayer = privateKeyToAccount(KEYS.relayer);
+  const seller = privateKeyToAccount(KEYS.seller);
+  const buyer = privateKeyToAccount(KEYS.buyer);
+
+  const deployer = createWalletClient({ account: relayer, chain, transport: http(rpcUrl) });
+  const sellerWallet = createWalletClient({ account: seller, chain, transport: http(rpcUrl) });
+
+  // A signer with code is checked through ERC-1271 rather than ECDSA, which an ordinary key
+  // cannot satisfy. Fail here with the reason rather than deep inside a reverted settlement.
+  for (const [role, address] of [
+    ["seller", seller.address],
+    ["buyer", buyer.address],
+  ] as const) {
+    const code = await publicClient.getCode({ address });
+    if (code && code !== "0x") {
+      anvil.kill();
+      throw new Error(
+        `${role} ${address} has code on this fork (${code.slice(0, 12)}...). ECDSA signatures ` +
+          "from it are checked via ERC-1271 and will be rejected; use a key with no code.",
+      );
+    }
+  }
+
+  // The relayer pays gas; the seller pays gas to create its listing. The buyer gets nothing:
+  // needing no ETH is the property this whole path exists to demonstrate.
+  for (const address of [relayer.address, seller.address]) {
+    await publicClient.request({
+      method: "anvil_setBalance" as never,
+      params: [address, toHex(100n * 10n ** 18n)] as never,
+    });
+  }
+
+  // Deploy the adapter from the Foundry artifact, so the exact compiled contract under test in
+  // the Solidity suites is the one this HTTP path settles through.
+  const artifactPath = path.join(
+    REPO_ROOT,
+    "out/NotaX402Settlement.sol/NotaX402Settlement.json",
+  );
+  let artifact: { abi: unknown[]; bytecode: { object: Hex } };
+  try {
+    artifact = JSON.parse(await readFile(artifactPath, "utf8"));
+  } catch {
+    anvil.kill();
+    throw new Error(`missing ${artifactPath}; run \`forge build\` first`);
+  }
+
+  const deployHash = await deployer.deployContract({
+    abi: artifact.abi as never,
+    bytecode: artifact.bytecode.object,
+    args: [NOTA_RECEIPT_STORE],
+  });
+  const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+  const adapter = deployReceipt.contractAddress as Address;
+
+  // The post-deploy step the adapter cannot perform for itself: the registry owner authorizes it
+  // as a consumer. Without this every settlement reverts with UnauthorizedConsumer.
+  const registryOwner = await publicClient.readContract({
+    address: PURCHASE_REF_REGISTRY,
+    abi: purchaseRefRegistryAbi,
+    functionName: "owner",
+  });
+
+  await publicClient.request({
+    method: "anvil_impersonateAccount" as never,
+    params: [registryOwner] as never,
+  });
+  await publicClient.request({
+    method: "anvil_setBalance" as never,
+    params: [registryOwner, toHex(10n ** 18n)] as never,
+  });
+
+  const ownerWallet = createWalletClient({ chain, transport: http(rpcUrl) });
+  const authorizeHash = await ownerWallet.writeContract({
+    account: registryOwner,
+    address: PURCHASE_REF_REGISTRY,
+    abi: purchaseRefRegistryAbi,
+    functionName: "setConsumerAuthorization",
+    args: [adapter, true],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: authorizeHash });
+  await publicClient.request({
+    method: "anvil_stopImpersonatingAccount" as never,
+    params: [registryOwner] as never,
+  });
+
+  const listingHash = keccak256(toHex("nota-x402-e2e-listing"));
+
+  // createListing assigns nextListingId and then increments it, so the id it will hand out is
+  // whatever the counter reads beforehand.
+  const listingId = await publicClient.readContract({
+    address: NOTA_RECEIPT_STORE,
+    abi: notaReceiptStoreAbi,
+    functionName: "nextListingId",
+  });
+
+  const createHash = await sellerWallet.writeContract({
+    address: NOTA_RECEIPT_STORE,
+    abi: notaReceiptStoreAbi,
+    functionName: "createListing",
+    args: [listingHash, 0n, 1],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: createHash });
+
+  const listing = await publicClient.readContract({
+    address: NOTA_RECEIPT_STORE,
+    abi: notaReceiptStoreAbi,
+    functionName: "getListing",
+    args: [listingId],
+  });
+
+  if (listing.seller.toLowerCase() !== seller.address.toLowerCase()) {
+    throw new Error(`listing ${listingId} is not owned by the test seller`);
+  }
+
+  // Fund the buyer with USDC by writing the balance slot directly.
+  const balanceSlot = keccak256(
+    encodeAbiParameters(
+      [{ type: "address" }, { type: "uint256" }],
+      [buyer.address, USDC_BALANCE_SLOT],
+    ),
+  );
+  await publicClient.request({
+    method: "anvil_setStorageAt" as never,
+    params: [USDC, balanceSlot, pad(toHex(1_000_000_000n))] as never,
+  });
+
+  const facilitatorApp = createFacilitator({
+    rpcUrl,
+    chainId: CHAIN_ID,
+    privateKey: KEYS.relayer,
+    allowedAdapters: [adapter],
+  });
+  const facilitator = await listen(facilitatorApp);
+
+  const resourcePortNumber = await reservePort();
+  const resourceBaseUrl = `http://127.0.0.1:${resourcePortNumber}`;
+
+  const resource = await listen(
+    createResourceServer({
+      rpcUrl,
+      chainId: CHAIN_ID,
+      store: NOTA_RECEIPT_STORE,
+      settlementToken: USDC,
+      purchaseRefRegistry: PURCHASE_REF_REGISTRY,
+      adapter,
+      facilitatorUrl: facilitator.url,
+      sellerPrivateKey: KEYS.seller,
+      listingId,
+      baseUrl: resourceBaseUrl,
+      fromBlock: deployReceipt.blockNumber,
+    }),
+    resourcePortNumber,
+  );
+
+  return {
+    rpcUrl,
+    chainId: CHAIN_ID,
+    adapter,
+    listingId,
+    seller: seller.address,
+    buyer: buyer.address,
+    buyerPrivateKey: KEYS.buyer,
+    resourceBaseUrl,
+    resourceUrl: `${resourceBaseUrl}/reports/base-usdc-flows-2026-09`,
+    facilitatorUrl: facilitator.url,
+    publicClient: publicClient as PublicClient,
+    async usdcBalance(account: Address) {
+      return publicClient.readContract({
+        address: USDC,
+        abi: eip3009Abi,
+        functionName: "balanceOf",
+        args: [account],
+      });
+    },
+    async stop() {
+      await close(resource.server);
+      await close(facilitator.server);
+      anvil.kill();
+    },
+  };
+}
+
