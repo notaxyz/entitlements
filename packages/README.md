@@ -64,7 +64,9 @@ A Nota quote binds one buyer, and the adapter rejects unbound quotes outright, s
 
 `purchaseRefNonce` is what makes the on-chain `purchaseRef` unguessable, and it is the credential that redeems the entitlement later. **It appears in no 402 response, no settlement request, and no calldata** — only its hash reaches the chain. The extension payload has no field it could go in, and an end-to-end test asserts it is absent from the 402 body.
 
-The one channel that carries it is the paid resource response, after settlement, to the payer that funded it — which is what makes the entitlement theirs to redeem. Redemption itself is not wired up here.
+Exactly one channel carries it: the paid resource response, after settlement, to the payer that funded it. That is what makes the entitlement theirs to redeem, and it is a deliberate choice rather than an incidental one — an end-to-end test asserts both halves, that the credential is absent before payment and that the deployed store reconstructs the settled `purchaseRef` from what is handed over.
+
+Redemption itself is not wired up here. The bundle the buyer now holds is what `EntitlementRedemption` takes.
 
 ## Verification is from chain state
 
