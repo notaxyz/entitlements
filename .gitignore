@@ -20,3 +20,6 @@ lcov.info
 .DS_Store
 ._*
 __MACOSX/
+
+# Node
+node_modules/

@@ -1,0 +1,15 @@
+{
+  "name": "@nota/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@nota/client": "*",
+    "@nota/facilitator": "*",
+    "@nota/resource-server": "*",
+    "@nota/x402-nota": "*",
+    "viem": "^2.21.55"
+  }
+}
