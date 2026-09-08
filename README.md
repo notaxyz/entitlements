@@ -95,13 +95,20 @@ forge build
 forge test
 ```
 
-Deterministic unit tests run against minimal mock store and registry contracts, so CI exercises the entitlement behavior without external infrastructure. Separate integration suites fork Base mainnet and call the deployed contracts; only those suites skip when `BASE_RPC_URL` is absent.
+Tests come in two layers.
 
-The x402 suite is fork-only by design: it signs real EIP-712 quotes against the deployed store's domain and real EIP-3009 authorizations against deployed USDC, and it pranks the registry owner to authorize the adapter in `setUp`. Both domain separators are rebuilt from what the deployed contracts report rather than hardcoded, and the USDC one is checked against the token's own `DOMAIN_SEPARATOR`.
+**Deterministic suites** run against mock store, registry, and EIP-3009 token contracts, need no RPC, and never skip. This is what CI runs, so every commit is checked. `NotaX402Settlement.t.sol` covers the adapter's own logic: authorization binding, the unbound-quote and `purchasesPaused` gates, registry authorization, fee legs including a zero protocol leg that must be skipped rather than sent to `address(0)`, a store whose legs do not sum to the gross, and every event field.
+
+**Fork suites** run the same contracts against the real Base-mainnet deployment and skip when `BASE_RPC_URL` is absent. They cover what only the deployed contracts can prove: real EIP-712 seller signatures against the store's own domain, real EIP-3009 authorizations against deployed USDC, the registry owner authorizing the adapter, and settling through the adapter and then redeeming the result end to end. Both domain separators are rebuilt from what the deployed contracts report rather than hardcoded, and the USDC one is checked against the token's own `DOMAIN_SEPARATOR`.
 
 ```sh
-BASE_RPC_URL=https://your-base-mainnet-rpc forge test --match-path test/NotaX402SettlementFork.t.sol
+forge test                                              # deterministic only; fork suites skip
+BASE_RPC_URL=https://your-base-mainnet-rpc forge test    # everything
 ```
+
+The mock store does not verify signatures — it exposes the verification *result* as a knob. Real seller-signature verification is a fork-suite concern, because the thing being tested there is the deployed store, not a reimplementation of it.
+
+CI pins Foundry to the version in [`.github/workflows/test.yml`](./.github/workflows/test.yml). `forge fmt` output differs between versions, so match that version locally or `forge fmt --check` will disagree with CI.
 
 Receipt #1 supplies the consumed reference used for deployed-contract compatibility testing without committing its redemption preimage bundle:
 
