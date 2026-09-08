@@ -69,6 +69,18 @@ contract NotaX402Settlement is ReentrancyGuard {
     /// @notice Emitted once per successful x402 settlement.
     /// @param receiptId Identifier from this adapter's own id space. It is NOT a
     ///        `NotaReceiptStore` receipt id and must not be treated as interchangeable with one.
+    /// @param listingId Listing the quote was issued against. Adapter settlements do not emit
+    ///        `ReceiptPurchasedV2`, and `purchaseRef` does not commit to a listing, so without
+    ///        this field a settlement could not be attributed to a listing from its own event.
+    ///
+    ///        This is deliberately ASYMMETRIC with `EntitlementRedemption.EntitlementRedeemed`,
+    ///        which omits the listing id on purpose. The difference is what a signature covers.
+    ///        Here `listingId` is a member of the seller-signed EIP-712 `SignedReceiptQuote`, so
+    ///        the seller signature the store verified above attests to it and emitting it
+    ///        publishes an attested fact. Redemption has no signature over a listing id, so a
+    ///        seller could emit any listing they liked; that event omits it rather than
+    ///        publishing an unattested claim, and consumers join it by `purchaseRef` instead.
+    ///        Same field, opposite correct answer. Do not "fix" either event to match the other.
     /// @param purchaseRef The globally consume-once reference this settlement consumed.
     /// @param authorizationNonce The EIP-3009 nonce, public from this point on. It is not the
     ///        redemption `purchaseRefNonce`, which never appears on-chain.
@@ -76,6 +88,7 @@ contract NotaX402Settlement is ReentrancyGuard {
         uint256 indexed receiptId,
         address indexed seller,
         address indexed buyer,
+        uint256 listingId,
         bytes32 purchaseRef,
         uint256 amount,
         bytes32 metadataHash,
@@ -182,15 +195,27 @@ contract NotaX402Settlement is ReentrancyGuard {
 
         _distributeProceeds(validation);
 
+        _emitSettled(receiptId, validation.seller, quote, authorization.nonce);
+    }
+
+    /// @dev Split out so the event's nine fields do not have to be live on the stack alongside
+    ///      the settlement locals.
+    function _emitSettled(
+        uint256 receiptId,
+        address seller,
+        INotaReceiptStore.SignedReceiptQuote calldata quote,
+        bytes32 authorizationNonce
+    ) private {
         emit X402ReceiptSettled(
             receiptId,
-            validation.seller,
+            seller,
             quote.buyer,
+            quote.listingId,
             quote.purchaseRef,
             quote.amount,
             quote.metadataHash,
             quote.agentId,
-            authorization.nonce
+            authorizationNonce
         );
     }
 
