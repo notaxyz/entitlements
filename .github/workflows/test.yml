@@ -38,3 +38,29 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+  x402:
+    name: x402 TypeScript packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The end-to-end suite needs a Base fork and skips without BASE_RPC_URL, the same way the
+      # Solidity fork suites do. The deterministic tests always run.
+      - name: Run tests
+        run: npm test

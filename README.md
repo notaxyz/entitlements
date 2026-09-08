@@ -92,6 +92,12 @@ ENTITLEMENT_ACCEPTED_CONSUMERS=<adapter address> \
 
 A redemption contract deployed without the adapter in its list rejects every x402 purchase with `EntitlementNotPaid`, permanently. See [`SECURITY.md`](./SECURITY.md) for what that trust set means and what a later redeployment costs.
 
+## x402 layer
+
+[`packages/`](./packages) holds the TypeScript path an agent actually walks: a paid endpoint that answers with 402 and a Nota extension, an agent that verifies the itemised purchase before signing, and a facilitator that submits the settlement and pays the gas so the buyer needs no ETH. See [`packages/README.md`](./packages/README.md).
+
+It is a Nota-aware settlement path, not general x402 support, and not a generalized facilitator.
+
 ## Development
 
 The project uses Foundry and Solidity 0.8.24. Clone with submodules; the adapter uses OpenZeppelin's `SafeERC20` and `ReentrancyGuard`.
