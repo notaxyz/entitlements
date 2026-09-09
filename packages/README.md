@@ -84,6 +84,22 @@ Exactly one channel carries it: the paid resource response, after settlement, to
 
 Redemption itself is not wired up here. The bundle the buyer now holds is what `EntitlementRedemption` takes.
 
+## This is a Nota-specific scheme, not x402 `exact`
+
+The 402 response advertises `nota-exact`, not `exact`, and that is deliberate.
+
+The flow here does not match the registered `exact` semantics. A client returns a reference to an
+already-settled on-chain receipt rather than a transfer authorization for a facilitator to
+execute, and funds reach the seller through the Nota adapter rather than directly, which is what
+makes the purchase reference consume-once and the receipt redeemable. Advertising `exact` would
+invite a generic x402 client to attempt a settlement it cannot complete.
+
+There is no PayAI or generalized-facilitator compatibility here, and none is attempted. This is a
+Nota-aware settlement path: the facilitator submits to a specific adapter on an allowlist, and the
+agent authorizes payment only to adapters it was configured to trust. Interoperating with the
+wider x402 ecosystem would mean registering the mechanism and testing against the x402 SDK, which
+this does not yet do.
+
 ## Verification is from chain state
 
 The resource server does not trust the payment payload. It reads `X402ReceiptSettled` from the adapter for the purchase reference it issued, then checks the seller, buyer, amount, listing, and metadata commitment against the quote it actually offered, and confirms with `PurchaseRefRegistry` that the reference was consumed by the expected adapter. The transaction hash a client may include is used for logging and never as evidence.

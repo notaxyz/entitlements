@@ -1,5 +1,5 @@
 import { createFacilitator } from "@nota/facilitator";
-import { createResourceServer } from "@nota/resource-server";
+import { createResourceServer, fileQuoteStore } from "@nota/resource-server";
 import {
   NOTA_RECEIPT_STORE,
   PURCHASE_REF_REGISTRY,
@@ -10,7 +10,8 @@ import {
   eip3009Abi,
 } from "@nota/x402-nota";
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +69,8 @@ export interface Fixture {
   facilitatorUrl: string;
   publicClient: PublicClient;
   usdcBalance(account: Address): Promise<bigint>;
+  /// Tears the resource server down and starts a fresh one on the same port and state.
+  restartResourceServer(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -124,7 +127,12 @@ function reservePort(): Promise<number> {
 }
 
 function close(server: Server): Promise<void> {
-  return new Promise((resolve) => server.close(() => resolve()));
+  return new Promise((resolve) => {
+    // fetch keeps connections alive, and server.close() waits for them. Without this a restart
+    // hangs until the agent's idle sockets time out.
+    server.closeAllConnections();
+    server.close(() => resolve());
+  });
 }
 
 export async function startFixture(): Promise<Fixture> {
@@ -280,21 +288,27 @@ export async function startFixture(): Promise<Fixture> {
 
   const resourcePortNumber = await reservePort();
   const resourceBaseUrl = `http://127.0.0.1:${resourcePortNumber}`;
+  const stateDir = await mkdtemp(path.join(tmpdir(), "nota-x402-"));
+  const quoteStorePath = path.join(stateDir, "issued-quotes.json");
 
-  const resource = await listen(
-    createResourceServer({
-      rpcUrl,
-      chainId: CHAIN_ID,
-      store: NOTA_RECEIPT_STORE,
-      settlementToken: USDC,
-      purchaseRefRegistry: PURCHASE_REF_REGISTRY,
-      adapter,
-      facilitatorUrl: facilitator.url,
-      sellerPrivateKey: KEYS.seller,
-      listingId,
-      baseUrl: resourceBaseUrl,
-      fromBlock: deployReceipt.blockNumber,
-    }),
+  const resourceConfig = {
+    rpcUrl,
+    chainId: CHAIN_ID,
+    store: NOTA_RECEIPT_STORE,
+    settlementToken: USDC,
+    purchaseRefRegistry: PURCHASE_REF_REGISTRY,
+    adapter,
+    facilitatorUrl: facilitator.url,
+    sellerPrivateKey: KEYS.seller,
+    listingId,
+    baseUrl: resourceBaseUrl,
+    fromBlock: deployReceipt.blockNumber,
+  };
+
+  // File-backed, so a restart in the middle of the suite behaves the way a restart in production
+  // would rather than quietly passing on in-process state.
+  let resource = await listen(
+    createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
     resourcePortNumber,
   );
 
@@ -318,6 +332,26 @@ export async function startFixture(): Promise<Fixture> {
         functionName: "balanceOf",
         args: [account],
       });
+    },
+    async restartResourceServer() {
+      await close(resource.server);
+      resource = await listen(
+        createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
+        resourcePortNumber,
+      );
+
+      // fetch pools keep-alive sockets per origin, and the ones pointing at the old process are
+      // now dead. The first request through each picks one up and fails; these absorb that so the
+      // test exercises the restart rather than a stale socket.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const ok = await fetch(`${resourceBaseUrl}/health`).then(
+          (response) => response.ok,
+          () => false,
+        );
+        if (ok) return;
+      }
+
+      throw new Error("resource server did not come back after restart");
     },
     async stop() {
       await close(resource.server);

@@ -1,5 +1,8 @@
 import type { Address, Hex } from "viem";
 
+import type { NOTA_SCHEME } from "./addresses.js";
+
+
 /// The seller-signed quote, exactly as `NotaX402Settlement.settleWithAuthorization` takes it.
 export interface SignedReceiptQuote {
   listingId: bigint;
@@ -117,7 +120,7 @@ export interface NotaExtension {
 
 /// Standard-shaped x402 payment requirements, with Nota hanging off `extensions`.
 export interface PaymentRequirements {
-  scheme: "exact";
+  scheme: typeof NOTA_SCHEME;
   network: string;
   maxAmountRequired: string;
   resource: string;
@@ -140,7 +143,7 @@ export interface PaymentRequiredResponse {
 /// What the client sends back once settlement has landed, in the `X-PAYMENT` header.
 export interface PaymentPayload {
   x402Version: 1;
-  scheme: "exact";
+  scheme: typeof NOTA_SCHEME;
   network: string;
   payload: {
     kind: typeof NOTA_EXTENSION_KIND;

@@ -2,6 +2,7 @@ import { payAndFetch, PaymentRefused, refetchPaidResource } from "@nota/client";
 import {
   baseDeployment,
   NOTA_EXTENSION_KIND,
+  NOTA_SCHEME,
   notaReceiptStoreAbi,
   NOTA_RECEIPT_STORE,
   requireNotaExtension,
@@ -102,7 +103,7 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
         "x-payment": Buffer.from(
           JSON.stringify({
             x402Version: 1,
-            scheme: "exact",
+            scheme: NOTA_SCHEME,
             network: "base",
             payload: {
               kind: NOTA_EXTENSION_KIND,
@@ -194,6 +195,24 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
     ).rejects.toThrow(/rejected by the trusted store/);
   });
 
+  it("still serves a paid purchase after the server restarts", async () => {
+    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
+
+    // Settlement is irreversible. If the quote and its credential only existed in memory, a
+    // restart would strand a purchase the buyer has already paid for.
+    await fixture.restartResourceServer();
+
+    const again = await refetchPaidResource<{ report: string }>(
+      fixture.resourceUrl,
+      paid.receipt.purchaseRef,
+      fixture.adapter,
+      agentConfig(),
+    );
+
+    expect(again.content.report).toBe("base-usdc-flows-2026-09");
+    expect(again.entitlement?.purchaseRefNonce).toBe(paid.entitlement?.purchaseRefNonce);
+  });
+
   it("refuses to pay when the metadata document does not match the commitment", async () => {
     // Stands in for a server, proxy, or middlebox that alters the itemisation after the seller
     // signed it. The signature still verifies on chain; the document no longer describes it.
@@ -273,7 +292,7 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
         "x-payment": Buffer.from(
           JSON.stringify({
             x402Version: 1,
-            scheme: "exact",
+            scheme: NOTA_SCHEME,
             network: "base",
             payload: {
               kind: NOTA_EXTENSION_KIND,

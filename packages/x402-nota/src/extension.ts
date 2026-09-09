@@ -1,5 +1,6 @@
 import { isAddressEqual, type Address, type Hex } from "viem";
 
+import { NOTA_SCHEME } from "./addresses.js";
 import {
   NOTA_EXTENSION_KIND,
   quoteFromWire,
@@ -117,7 +118,7 @@ export function buildPaymentPayload(
 ): PaymentPayload {
   return {
     x402Version: 1,
-    scheme: "exact",
+    scheme: NOTA_SCHEME,
     network,
     payload: { kind: NOTA_EXTENSION_KIND, purchaseRef, adapter, txHash },
   };

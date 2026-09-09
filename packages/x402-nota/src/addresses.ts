@@ -13,3 +13,14 @@ export const ZERO_BYTES32 =
 
 /// The x402 `network` identifier for Base mainnet.
 export const NETWORK = "base" as const;
+
+/**
+ * The payment scheme this stack implements.
+ *
+ * Deliberately NOT `exact`. The flow here does not match the registered `exact` semantics: the
+ * payload a client returns is a reference to an already-settled on-chain receipt rather than a
+ * transfer authorization for a facilitator to execute, and funds reach the seller through the
+ * Nota adapter rather than directly. Advertising `exact` would invite a generic x402 client to
+ * try, and fail, to settle it. Naming it separately makes the mechanism explicit.
+ */
+export const NOTA_SCHEME = "nota-exact" as const;

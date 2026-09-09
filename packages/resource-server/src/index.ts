@@ -8,9 +8,11 @@ import {
   hashCheckoutMetadata,
   NETWORK,
   NOTA_EXTENSION_KIND,
+  NOTA_SCHEME,
   notaChain,
   notaReceiptStoreAbi,
   purchaseRefRegistryAbi,
+  quoteFromWire,
   quoteToWire,
   signQuote,
   x402ReceiptSettledEvent,
@@ -33,6 +35,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { randomBytes } from "node:crypto";
 
 import { CATALOG } from "./catalog.js";
+import { memoryQuoteStore, type QuoteStore } from "./store.js";
 
 export interface ResourceServerConfig {
   rpcUrl: string;
@@ -51,23 +54,11 @@ export interface ResourceServerConfig {
   fromBlock: bigint;
   quoteTtlSeconds?: bigint;
   accessChallengeTtlSeconds?: number;
-}
-
-/**
- * A quote this server issued, kept so a later payment can be checked against what was actually
- * offered rather than against whatever the payer echoes back.
- *
- * `purchaseRefNonce` is the redemption credential. It is generated here, it is never placed in a
- * 402 response or a settlement request, and the only channel that ever carries it is the paid
- * resource response, delivered to the payer after their settlement has been found on chain.
- */
-interface IssuedQuote {
-  quote: SignedReceiptQuote;
-  metadata: CheckoutMetadata;
-  resource: string;
-  rawPurchaseRef: string;
-  purchaseRefNonce: Hex;
-  catalogId: string;
+  /**
+   * Where issued quotes live. Defaults to memory, which loses paid purchases on restart; pass
+   * `fileQuoteStore(path)` for anything that should survive one.
+   */
+  quoteStore?: QuoteStore;
 }
 
 export function createResourceServer(config: ResourceServerConfig): Express {
@@ -77,7 +68,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   const walletClient = createWalletClient({ account: seller, chain, transport: http(config.rpcUrl) });
   const quoteTtl = config.quoteTtlSeconds ?? 900n;
 
-  const issued = new Map<Hex, IssuedQuote>();
+  const issued = config.quoteStore ?? memoryQuoteStore();
   /// Outstanding access challenges, single-use and short-lived.
   const challenges = new Map<Hex, AccessChallenge>();
   const challengeTtl = config.accessChallengeTtlSeconds ?? 120;
@@ -96,7 +87,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
    */
   app.post("/access/challenge", async (request: Request, response: Response) => {
     const purchaseRef = (request.body as { purchaseRef?: Hex })?.purchaseRef;
-    const record = purchaseRef ? issued.get(purchaseRef) : undefined;
+    const record = purchaseRef ? await issued.get(purchaseRef) : undefined;
 
     if (!purchaseRef || !record) {
       response.status(404).json({ error: "no quote was issued for that purchase reference" });
@@ -108,7 +99,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       challenge: toHex(randomBytes(32)),
       resource: record.resource,
       purchaseRef,
-      buyer: record.quote.buyer,
+      buyer: quoteFromWire(record.quote).buyer,
       expiresAt: Math.floor(Date.now() / 1000) + challengeTtl,
     };
 
@@ -158,7 +149,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
   function acceptsBlock(resource: string, description: string, amount: bigint) {
     return {
-      scheme: "exact" as const,
+      scheme: NOTA_SCHEME,
       network: NETWORK,
       maxAmountRequired: amount.toString(),
       resource,
@@ -232,8 +223,11 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       seller: seller.address,
     });
 
-    issued.set(purchaseRef, {
-      quote,
+    // Persisted before the signed quote leaves this process. A settlement is irreversible, so a
+    // crash between handing out a quote and recording it would strand a paid purchase.
+    await issued.put({
+      purchaseRef,
+      quote: quoteToWire(quote),
       metadata,
       resource,
       rawPurchaseRef,
@@ -332,7 +326,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       return;
     }
 
-    const record = issued.get(purchaseRef);
+    const record = await issued.get(purchaseRef);
 
     if (!record || record.resource !== resource) {
       response.status(402).json({ error: "no quote was issued for that purchase reference" });
@@ -357,7 +351,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
     const settled = settlement.args;
 
-    const { quote } = record;
+    const quote = quoteFromWire(record.quote);
     const problems: string[] = [];
 
     if (!isAddressEqual(settled.seller!, seller.address)) {
@@ -440,3 +434,4 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 }
 
 export { buildPaymentPayload, CATALOG };
+export { fileQuoteStore, memoryQuoteStore, type QuoteStore } from "./store.js";
