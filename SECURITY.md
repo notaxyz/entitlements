@@ -82,6 +82,14 @@ The adapter has no owner, no pause switch, and no upgrade path, and holds no fun
 
 Settlement consumes a purchase reference, which only registry-owner-authorized modules may do. The registry owner must call `setConsumerAuthorization(<adapter address>, true)` before the adapter can settle anything; until then every call reverts with `UnauthorizedConsumer`. That authorization is also a revocation point: the registry owner can disable the adapter at any time without the adapter having a pause switch of its own.
 
+### Paid does not mean authorised
+
+A purchase reference identifies a purchase; it does not identify who is asking for it. It appears in the 402 response and again in the `X402ReceiptSettled` event, so it is public to anyone watching the chain.
+
+The resource server therefore separates two questions. *Was this paid?* is answered from chain state — the settlement event and the registry. *Who is asking?* is answered by a single-use, short-lived challenge that the requester must sign with the wallet the settlement records as the buyer, verified with `verifyMessage` so an ERC-1271 smart wallet authenticates the same way it paid. Content and the redemption credential are released only when both are satisfied.
+
+A supplied address is not authentication. The `X-PAYER` header exists so a quote can be bound to a buyer before payment; it is a claim, and nothing on the paid path relies on it.
+
 ### Redemption depends on deploy-time configuration
 
 An adapter settlement is redeemable only through an `EntitlementRedemption` that was constructed with that adapter in its accepted set. Deploy the adapter first and pass its address to the redemption deployment; a redemption contract deployed without it rejects every x402 purchase with `EntitlementNotPaid`, permanently, because the set cannot be changed afterwards. `test_AdapterSettlementIsNotRedeemableWhenAdapterIsNotAccepted` pins that failure mode.

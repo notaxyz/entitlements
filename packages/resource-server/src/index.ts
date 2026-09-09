@@ -1,6 +1,10 @@
 import {
+  accessChallengeMessage,
+  ACCESS_CHALLENGE_KIND,
   buildPaymentPayload,
+  decodeAccessProof,
   decodePaymentPayload,
+  type AccessChallenge,
   hashCheckoutMetadata,
   NETWORK,
   NOTA_EXTENSION_KIND,
@@ -46,6 +50,7 @@ export interface ResourceServerConfig {
   /// First block to scan for settlements. The adapter's deployment block.
   fromBlock: bigint;
   quoteTtlSeconds?: bigint;
+  accessChallengeTtlSeconds?: number;
 }
 
 /**
@@ -73,12 +78,42 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   const quoteTtl = config.quoteTtlSeconds ?? 900n;
 
   const issued = new Map<Hex, IssuedQuote>();
+  /// Outstanding access challenges, single-use and short-lived.
+  const challenges = new Map<Hex, AccessChallenge>();
+  const challengeTtl = config.accessChallengeTtlSeconds ?? 120;
 
   const app = express();
   app.use(express.json({ limit: "256kb" }));
 
   app.get("/health", (_request: Request, response: Response) => {
     response.json({ ok: true, seller: seller.address, listingId: config.listingId.toString() });
+  });
+
+  /**
+   * Issues a single-use challenge for a settled purchase. Anyone may ask for one -- it grants
+   * nothing. Only a signature over it, from the wallet the settlement records as the buyer,
+   * releases the content.
+   */
+  app.post("/access/challenge", async (request: Request, response: Response) => {
+    const purchaseRef = (request.body as { purchaseRef?: Hex })?.purchaseRef;
+    const record = purchaseRef ? issued.get(purchaseRef) : undefined;
+
+    if (!purchaseRef || !record) {
+      response.status(404).json({ error: "no quote was issued for that purchase reference" });
+      return;
+    }
+
+    const challenge: AccessChallenge = {
+      kind: ACCESS_CHALLENGE_KIND,
+      challenge: toHex(randomBytes(32)),
+      resource: record.resource,
+      purchaseRef,
+      buyer: record.quote.buyer,
+      expiresAt: Math.floor(Date.now() / 1000) + challengeTtl,
+    };
+
+    challenges.set(challenge.challenge, challenge);
+    response.json(challenge);
   });
 
   app.get("/reports/:id", async (request: Request, response: Response) => {
@@ -93,7 +128,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     const paymentHeader = request.header("x-payment");
 
     if (paymentHeader) {
-      await serveIfPaid(paymentHeader, resource, response);
+      await serveIfPaid(paymentHeader, request.header("x-payment-auth"), resource, response);
       return;
     }
 
@@ -230,11 +265,61 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   }
 
   /**
+   * Verifies control of the buyer wallet against a challenge this server issued. `purchaseRef` is
+   * public, so it says which purchase is being claimed and nothing about who is claiming it.
+   *
+   * The signature is checked with `verifyMessage`, which falls back to ERC-1271, so a smart-wallet
+   * buyer authenticates the same way it paid.
+   */
+  async function authenticateBuyer(
+    proofHeader: string | undefined,
+    purchaseRef: Hex,
+    resource: string,
+    buyer: Address,
+  ): Promise<string | undefined> {
+    if (!proofHeader) return "missing X-PAYMENT-AUTH; request a challenge from /access/challenge";
+
+    let proof: ReturnType<typeof decodeAccessProof>;
+    try {
+      proof = decodeAccessProof(proofHeader);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+
+    const challenge = challenges.get(proof.challenge);
+
+    if (!challenge) return "unknown or already-used challenge";
+
+    // Single use, whatever the outcome. A challenge that has been answered once is spent.
+    challenges.delete(proof.challenge);
+
+    if (challenge.expiresAt < Math.floor(Date.now() / 1000)) return "challenge expired";
+    if (challenge.purchaseRef !== purchaseRef) return "challenge is for a different purchase";
+    if (challenge.resource !== resource) return "challenge is for a different resource";
+
+    const valid = await publicClient.verifyMessage({
+      address: buyer,
+      message: accessChallengeMessage(challenge),
+      signature: proof.signature,
+    });
+
+    return valid ? undefined : `signature does not prove control of ${buyer}`;
+  }
+
+  /**
    * Payment is established from chain state alone. The payload names a purchaseRef; everything
    * that decides whether the resource is served comes from the settlement event and the registry.
    * The transaction hash the client may include is used for logging and nothing else.
+   *
+   * Establishing that a purchase was paid is separate from establishing who is asking. Both are
+   * required before any content or credential leaves this server.
    */
-  async function serveIfPaid(paymentHeader: string, resource: string, response: Response) {
+  async function serveIfPaid(
+    paymentHeader: string,
+    proofHeader: string | undefined,
+    resource: string,
+    response: Response,
+  ) {
     let purchaseRef: Hex;
 
     try {
@@ -306,6 +391,23 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
     if (problems.length > 0) {
       response.status(402).json({ error: "settlement does not match the issued quote", problems });
+      return;
+    }
+
+    // Paid is not the same as authorised. purchaseRef is public, so without this anyone who saw
+    // the settlement event could take both the content and the redemption credential.
+    const authFailure = await authenticateBuyer(
+      proofHeader,
+      purchaseRef,
+      resource,
+      settled.buyer!,
+    );
+
+    if (authFailure) {
+      response.status(401).json({
+        error: "not authenticated as the buyer of this purchase",
+        detail: authFailure,
+      });
       return;
     }
 

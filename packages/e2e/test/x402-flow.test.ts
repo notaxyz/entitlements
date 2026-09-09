@@ -1,4 +1,4 @@
-import { payAndFetch, PaymentRefused } from "@nota/client";
+import { payAndFetch, PaymentRefused, refetchPaidResource } from "@nota/client";
 import {
   NOTA_EXTENSION_KIND,
   notaReceiptStoreAbi,
@@ -89,11 +89,13 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
     expect(reconstructed).toBe(paid.receipt.purchaseRef);
   });
 
-  it("serves the resource again for the same settled purchase reference", async () => {
-    const first = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
-    const replay = await fetch(fixture.resourceUrl, {
+  it("refuses an anonymous request that merely names the public purchase reference", async () => {
+    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
+
+    // purchaseRef is published in the 402 response and again in the settlement event, so anyone
+    // can name it. Naming it must not be enough to obtain the content or the credential.
+    const anonymous = await fetch(fixture.resourceUrl, {
       headers: {
-        "x-payer": fixture.buyer,
         "x-payment": Buffer.from(
           JSON.stringify({
             x402Version: 1,
@@ -101,7 +103,7 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
             network: "base",
             payload: {
               kind: NOTA_EXTENSION_KIND,
-              purchaseRef: first.receipt.purchaseRef,
+              purchaseRef: paid.receipt.purchaseRef,
               adapter: fixture.adapter,
             },
           }),
@@ -110,7 +112,37 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
       },
     });
 
-    expect(replay.status).toBe(200);
+    expect(anonymous.status).toBe(401);
+    const body = await anonymous.text();
+    expect(body).not.toMatch(/purchaseRefNonce/i);
+    expect(body).not.toMatch(/netInflowUsd/);
+  });
+
+  it("refuses a challenge answered by a wallet that did not pay", async () => {
+    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
+
+    await expect(
+      refetchPaidResource(
+        fixture.resourceUrl,
+        paid.receipt.purchaseRef,
+        fixture.adapter,
+        agentConfig({ privateKey: fixture.intruderPrivateKey }),
+      ),
+    ).rejects.toThrow(/challenge names .*, not this agent|401/);
+  });
+
+  it("lets the buyer re-read a resource it already paid for", async () => {
+    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
+
+    const again = await refetchPaidResource<{ report: string }>(
+      fixture.resourceUrl,
+      paid.receipt.purchaseRef,
+      fixture.adapter,
+      agentConfig(),
+    );
+
+    expect(again.content.report).toBe("base-usdc-flows-2026-09");
+    expect(again.entitlement?.purchaseRefNonce).toBe(paid.entitlement?.purchaseRefNonce);
   });
 
   it("refuses to pay when the metadata document does not match the commitment", async () => {

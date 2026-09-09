@@ -1,5 +1,8 @@
 import {
+  accessChallengeMessage,
   buildPaymentPayload,
+  encodeAccessProof,
+  type AccessChallenge,
   checkExtension,
   deriveAuthorizationNonce,
   encodePaymentPayload,
@@ -176,9 +179,16 @@ export async function payAndFetch<T = unknown>(
 
   logger.info(`facilitator settled in ${settlement.txHash}, receipt ${settlement.receiptId}`);
 
+  // Paying does not by itself entitle anyone to the content: purchaseRef is public. The server
+  // challenges, and this proves control of the wallet that actually paid.
+  const proof = await proveBuyerControl(resourceUrl, quote.purchaseRef, buyer.address, doFetch, (message) =>
+    walletClient.signMessage({ account: buyer, message }),
+  );
+
   const paid = await doFetch(resourceUrl, {
     headers: {
       "x-payer": buyer.address,
+      "x-payment-auth": proof,
       "x-payment": encodePaymentPayload(
         buildPaymentPayload(
           body.accepts[0]?.network ?? "base",
@@ -198,6 +208,79 @@ export async function payAndFetch<T = unknown>(
   const payload = (await paid.json()) as PaidResource<T>;
 
   return { ...payload, receipt: settlement, metadata: document };
+}
+
+/**
+ * Re-read a resource already paid for, without paying again.
+ *
+ * The purchase reference alone is not a bearer token -- it is public -- so this repeats the
+ * challenge-and-sign step. Only the wallet that settled the purchase can do it.
+ */
+export async function refetchPaidResource<T = unknown>(
+  resourceUrl: string,
+  purchaseRef: Hex,
+  adapter: Address,
+  config: AgentConfig,
+): Promise<PaidResource<T>> {
+  const doFetch = config.fetchImpl ?? fetch;
+  const buyer = privateKeyToAccount(config.privateKey);
+  const chain = notaChain(config.chainId, config.rpcUrl);
+  const walletClient = createWalletClient({ account: buyer, chain, transport: http(config.rpcUrl) });
+
+  const proof = await proveBuyerControl(resourceUrl, purchaseRef, buyer.address, doFetch, (message) =>
+    walletClient.signMessage({ account: buyer, message }),
+  );
+
+  const response = await doFetch(resourceUrl, {
+    headers: {
+      "x-payment-auth": proof,
+      "x-payment": encodePaymentPayload(buildPaymentPayload("base", purchaseRef, adapter)),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`resource withheld (${response.status}): ${await response.text()}`);
+  }
+
+  return (await response.json()) as PaidResource<T>;
+}
+
+async function proveBuyerControl(
+  resourceUrl: string,
+  purchaseRef: Hex,
+  buyer: Address,
+  doFetch: typeof fetch,
+  sign: (message: string) => Promise<Hex>,
+): Promise<string> {
+  const origin = new URL(resourceUrl).origin;
+  const response = await doFetch(`${origin}/access/challenge`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ purchaseRef }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`could not obtain an access challenge (${response.status})`);
+  }
+
+  const challenge = (await response.json()) as AccessChallenge;
+
+  if (challenge.purchaseRef !== purchaseRef) {
+    throw new PaymentRefused("access challenge rejected", [
+      `challenge is for ${challenge.purchaseRef}, not the purchase just settled`,
+    ]);
+  }
+
+  if (challenge.buyer.toLowerCase() !== buyer.toLowerCase()) {
+    throw new PaymentRefused("access challenge rejected", [
+      `challenge names ${challenge.buyer}, not this agent`,
+    ]);
+  }
+
+  return encodeAccessProof({
+    challenge: challenge.challenge,
+    signature: await sign(accessChallengeMessage(challenge)),
+  });
 }
 
 async function resolveMetadata(

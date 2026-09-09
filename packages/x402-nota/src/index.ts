@@ -1,4 +1,5 @@
 export * from "./abi.js";
+export * from "./access.js";
 export * from "./addresses.js";
 export * from "./chain.js";
 export * from "./extension.js";

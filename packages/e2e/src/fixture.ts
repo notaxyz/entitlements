@@ -46,6 +46,9 @@ const KEYS = {
   relayer: keccak256(toHex("nota-x402-e2e:relayer")),
   seller: keccak256(toHex("nota-x402-e2e:seller")),
   buyer: keccak256(toHex("nota-x402-e2e:buyer")),
+  /// A wallet that never pays for anything, used to prove that knowing a purchase reference is
+  /// not the same as being entitled to what it bought. Needs no ETH: it only signs a message.
+  intruder: keccak256(toHex("nota-x402-e2e:intruder")),
 } satisfies Record<string, Hex>;
 
 /// FiatTokenV2_2 keeps balances in `balanceAndBlacklistStates` at storage slot 9 on Base.
@@ -59,6 +62,7 @@ export interface Fixture {
   seller: Address;
   buyer: Address;
   buyerPrivateKey: Hex;
+  intruderPrivateKey: Hex;
   resourceUrl: string;
   resourceBaseUrl: string;
   facilitatorUrl: string;
@@ -302,6 +306,7 @@ export async function startFixture(): Promise<Fixture> {
     seller: seller.address,
     buyer: buyer.address,
     buyerPrivateKey: KEYS.buyer,
+    intruderPrivateKey: KEYS.intruder,
     resourceBaseUrl,
     resourceUrl: `${resourceBaseUrl}/reports/base-usdc-flows-2026-09`,
     facilitatorUrl: facilitator.url,
