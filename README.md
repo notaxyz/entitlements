@@ -10,7 +10,7 @@ The registry attributes a consumption to the module that called it, so a direct 
 
 `listingId` is used to resolve and validate the seller, but it is not independently committed into `purchaseRef`. The redemption event therefore omits it. Indexers can join `EntitlementRedeemed` to the original `ReceiptPurchasedV2` event by `purchaseRef` to recover the authoritative listing.
 
-The contract does **not** identify the buyer or the purchasing agent, and it does not enforce the policy that a stolen receipt alone is insufficient. Agent binding is a merchant-side policy enforced by the AgentKit-protected redemption endpoint planned for day three. That endpoint must authenticate the intended agent before submitting a seller-authorized on-chain redemption.
+The contract does **not** identify the buyer or the purchasing agent, and it does not enforce the policy that a stolen receipt alone is insufficient. The Day 4 [redemption endpoint](./packages/resource-server/REDEMPTION.md) implements that merchant-side policy: it verifies a signed wallet challenge and requires the authenticated address to equal the settlement buyer before the seller submits redemption. **Current authentication is mock-wallet mode: genuine wallet signatures, but no verified human registration or AgentBook lookup.** World integration remains blocked; see [WORLD_FEEDBACK.md](./WORLD_FEEDBACK.md).
 
 See [`SECURITY.md`](./SECURITY.md) for the exact trust boundary and non-guarantees.
 
@@ -28,7 +28,9 @@ The receipt protocol predates ETHOnline 2026. Its baseline is [`notaxyz/contract
 | `PurchaseRefRegistry` | [`0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991`](https://basescan.org/address/0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991) |
 | USDC | [`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`](https://basescan.org/address/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) |
 
-Both constructors accept only the receipt-store address and discover the purchase-reference registry — and, for the adapter, the settlement token — from that store.
+Both constructors discover the purchase-reference registry from the receipt store;
+the adapter also discovers the settlement token there. Redemption additionally takes
+the fixed list of accepted settlement consumers.
 
 ## x402 settlement adapter
 
@@ -101,6 +103,34 @@ A redemption contract deployed without the adapter in its list rejects every x40
 It is a Nota-aware settlement path, not general x402 support, and not a generalized facilitator.
 
 ## Development
+
+### Day 4 backend demo
+
+With Node.js 20+, dependencies installed (`npm ci`), Foundry, and submodules present:
+
+```sh
+npm run demo:redemption
+```
+
+This starts a fresh local Anvil chain, builds and deploys the unchanged adapter and
+redemption contracts with existing mock Nota/token dependencies, and makes a new
+buyer-bound purchase using a buyer-generated preimage bundle. It proves:
+
+- Agent B with agent A's bundle: `403 BUYER_MISMATCH`, step 6, no transaction.
+- Agent A with the correct bundle: confirmed `EntitlementRedeemed` event.
+- Agent A again with a fresh signed challenge: `409 ALREADY_REDEEMED`, step 5, no transaction.
+
+The attacker runs first so the rejection demonstrates buyer binding, not replay
+protection. This is a local wallet-authentication demo, **not** a Base-mainnet purchase
+or a World-verified agent demo. The mock store does not validate seller signatures;
+deployed-store compatibility remains covered separately by the Base fork suites.
+`npm test` always runs the new HTTP/signature and local-EVM suites without an external
+RPC; missing Foundry is a failure, never a silent skip.
+
+See the [endpoint runbook](./packages/resource-server/REDEMPTION.md) for configuration,
+request signing, trust boundaries, and deployment limitations.
+
+### Contracts
 
 The project uses Foundry and Solidity 0.8.24. Clone with submodules; the adapter uses OpenZeppelin's `SafeERC20` and `ReentrancyGuard`.
 

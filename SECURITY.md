@@ -31,7 +31,7 @@ The purchase-reference preimage includes the seller, so a purchase reference is 
 
 The contract does not identify or authenticate the buyer or purchasing agent. Possession of the raw purchase reference and nonce does not establish an agent identity on-chain, and the contract has no record of which agent should receive the entitlement.
 
-In particular, the policy **“a stolen receipt is not enough” is not enforced by this contract**. It is a merchant-side authorization rule. The AgentKit-protected redemption endpoint planned for day three must authenticate the intended agent and apply that rule before causing the listing seller to submit the on-chain redemption.
+In particular, the policy **“a stolen receipt is not enough” is not enforced by this contract**. It is a merchant-side authorization rule implemented by the Day 4 redemption endpoint. Its current mock authorizer proves control of the settlement buyer's EOA wallet, not human backing. A World/AgentBook authorizer is not yet implemented or live-verified. A seller who bypasses this endpoint can still redeem directly.
 
 The contract also does not validate off-chain fulfillment, inspect receipt metadata, or require that a listing remains active after purchase.
 
@@ -40,6 +40,62 @@ The contract also does not validate off-chain fulfillment, inspect receipt metad
 The raw purchase reference is not necessarily secret. The `purchaseRefNonce` provides the cryptographic secrecy for the redemption preimage bundle. Both values are supplied as transaction calldata and become public once the transaction is published, so the bundle must be treated as a single-use redemption input rather than a long-lived authentication credential.
 
 Seller authorization prevents another address from redeeming directly, but it does not replace merchant-side agent authentication or seller-key security.
+
+### Day 4 redemption endpoint
+
+`POST /v1/redemptions` depends on the `AgentAuthorizer` interface, independently of
+settlement verification and seller transaction submission. The delivered
+`MockAgentAuthorizer` recovers an EOA signature over a server-issued, short-lived,
+single-use challenge. That challenge binds the exact request digest, HTTP method,
+configured origin, Base chain ID, redemption contract, and claimed agent wallet.
+The agent client checks the entire message before signing. User-supplied buyer or
+human-ID claims grant no authority. The returned `mock:wallet:...` identifier is
+synthetic and must never be treated as a World ID or evidence of a unique human.
+
+The server reads the successful, sufficiently confirmed purchase transaction from
+the configured Base RPC and decodes events only from the trusted store and configured
+adapters. `ReceiptPurchasedV2` and `X402ReceiptSettled` have different layouts and
+receipt-ID spaces; the endpoint selects by canonical `purchaseRef`, never receipt ID.
+An adapter transaction need not also emit the store event. Ambiguous claims for the
+same reference fail closed. The supplied listing must match the authoritative event,
+because the purchase reference alone does not commit to a listing.
+
+The registry must report consumption by that exact settlement emitter, not merely
+some authorized or accepted consumer. State is checked for prior redemption before
+the authenticated address is compared to the receipt buyer. Only then does the seller
+simulate and submit redemption; success requires the matching event from the configured
+redemption contract. Request validation happens before these numbered policy checks.
+
+Mock mode is explicit (`AGENT_AUTH_MODE=mock`), has no automatic fallback from World,
+binds to loopback, and is refused when `NODE_ENV=production`. It supports EOA signing
+only; ERC-1271 support in the payment path does not imply support in this mock authorizer.
+World registration, AgentBook resolution, and human-backed claims remain unverified.
+
+Operational limits:
+
+- A trusted RPC and trusted deployment configuration are required. Startup verifies
+  Base chain ID and store/registry/adapter/redemption wiring. Confirmations reduce
+  reorg exposure but do not eliminate it; default is two, not a finality guarantee.
+- One process serializes seller submissions and bounds its queue. Use a dedicated
+  seller writer. Multiple instances, shared seller-key writers, and restart-safe
+  submission recovery need a durable queue/nonce manager and are not supported yet.
+- An uncertain broadcast or confirmation result latches further submissions off.
+  Do not restart and retry blindly: reconcile the seller's pending/mined transactions
+  and `redeemedAt` first. The process intentionally does not auto-resubmit.
+- Challenges are bounded and expire in memory; restart invalidates them. Before
+  exposing the service, add authenticated traffic limits and durable coordination.
+  Challenge-capacity limits are not complete abuse/DoS protection.
+- The endpoint logs only allowlisted event/code/step/request-ID fields. It never
+  logs request bodies, authorization headers, human IDs, or RPC errors, which can
+  include the bundle. Body-parser failures are also sanitized. Reverse proxies,
+  APM, request capture, and RPC providers must independently suppress/redact bodies
+  and calldata; application log tests cannot enforce their policies.
+- The bundle is sent to the configured RPC in canonical helper calls and becomes
+  public in seller redemption calldata. Do not treat it as private after publication.
+
+Neither mock authentication nor a future World authorizer proves off-chain fulfillment,
+prevents a compromised buyer key from acting as the buyer, or constrains a seller
+who chooses to bypass the endpoint.
 
 ## x402 settlement adapter
 

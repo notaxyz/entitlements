@@ -78,11 +78,15 @@ A Nota quote binds one buyer, and the adapter rejects unbound quotes outright, s
 
 ### The redemption credential
 
-`purchaseRefNonce` is what makes the on-chain `purchaseRef` unguessable, and it is the credential that redeems the entitlement later. **It appears in no 402 response, no settlement request, and no calldata** — only its hash reaches the chain. The extension payload has no field it could go in, and an end-to-end test asserts it is absent from the 402 body.
+`purchaseRefNonce` is what makes the on-chain `purchaseRef` unguessable, and it is the credential that redeems the entitlement later. **It appears in no 402 response, settlement request, or settlement calldata** — payment publishes only the purchase-reference hash. The extension payload has no field it could go in, and an end-to-end test asserts it is absent from the 402 body. The later seller-submitted redemption transaction publishes the bundle in calldata; it is not a long-lived secret.
 
 Exactly one channel carries it: the paid resource response, after settlement, to a requester that has **proved control of the buyer wallet**. A settled `purchaseRef` is public — it is in the 402 response and in the settlement event — so naming one is not evidence of anything. The server issues a single-use challenge and the requester signs it; the signature is checked against the buyer the settlement records, via `verifyMessage`, so a smart-wallet buyer authenticates the same way it paid. That is what makes the entitlement theirs to redeem, and it is a deliberate choice rather than an incidental one — an end-to-end test asserts both halves, that the credential is absent before payment and that the deployed store reconstructs the settled `purchaseRef` from what is handed over.
 
-Redemption itself is not wired up here. The bundle the buyer now holds is what `EntitlementRedemption` takes.
+The separate [Day 4 redemption service](./resource-server/REDEMPTION.md) accepts this
+bundle plus the purchase transaction hash, authenticates the requester behind an
+`AgentAuthorizer` interface, and requires its wallet to equal the on-chain buyer.
+The current implementation verifies real EOA signatures in explicitly labelled mock
+mode; it does not verify World ID or resolve AgentBook registrations.
 
 ## This is a Nota-specific scheme, not x402 `exact`
 
@@ -106,7 +110,9 @@ The resource server does not trust the payment payload. It reads `X402ReceiptSet
 
 ## Running it
 
-Deterministic tests need nothing. The end-to-end suite forks Base and skips without `BASE_RPC_URL`, the same way the Solidity fork suites do.
+Deterministic tests need Node.js, Foundry (including Anvil), and initialized submodules,
+but no external RPC. The redemption local-EVM suite always runs and builds its artifacts;
+the separate Base end-to-end suite skips without `BASE_RPC_URL`.
 
 ```sh
 npm install
