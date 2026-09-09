@@ -168,9 +168,9 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   ): Promise<PaymentRequiredResponse> {
     const entry = CATALOG[catalogId]!;
 
-    // The entitlement bundle. Both halves stay on this server: the raw reference is not secret,
-    // but purchaseRefNonce is what makes the on-chain purchaseRef unguessable, and only its hash
-    // ever goes on chain or into a payload.
+    // The entitlement bundle stays on this server until authenticated paid delivery. The raw
+    // reference is not necessarily secret; purchaseRefNonce makes purchaseRef unguessable.
+    // Payment publishes only the hash. Later redemption publishes the bundle in calldata.
     const rawPurchaseRef = `nota_x402_${randomBytes(12).toString("hex")}`;
     const purchaseRefNonce = toHex(randomBytes(32));
 
@@ -421,7 +421,8 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       },
       // Handed over only here: after settlement, over the paid response, to the payer who funded
       // it. This is what makes the entitlement theirs to redeem. It is never in a 402 response,
-      // never in a settlement request, and never in calldata.
+      // never in a settlement request, and never in settlement calldata. Redemption later
+      // publishes the bundle in its own calldata.
       entitlement: {
         listingId: quote.listingId.toString(),
         rawPurchaseRef: record.rawPurchaseRef,
@@ -435,3 +436,6 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
 export { buildPaymentPayload, CATALOG };
 export { fileQuoteStore, memoryQuoteStore, type QuoteStore } from "./store.js";
+export { createRedemptionApp, type RedemptionAppConfig } from "./redemption/app.js";
+export { MockAgentAuthorizer, type AgentAuthorizer } from "./redemption/authorizer.js";
+export { ViemRedemptionChain, type RedemptionChain } from "./redemption/chain.js";
