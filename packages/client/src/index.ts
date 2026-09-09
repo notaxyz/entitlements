@@ -4,10 +4,13 @@ import {
   encodeAccessProof,
   type AccessChallenge,
   checkExtension,
+  checkTrustedDeployment,
   deriveAuthorizationNonce,
   encodePaymentPayload,
   extensionQuote,
   notaChain,
+  notaReceiptStoreAbi,
+  notaX402SettlementAbi,
   quoteDigest,
   readTokenDomain,
   requireNotaExtension,
@@ -21,6 +24,7 @@ import {
   type ReceiveAuthorization,
   type SettlementRequest,
   type SettlementResponse,
+  type TrustedDeployment,
 } from "@nota/x402-nota";
 import {
   createPublicClient,
@@ -61,6 +65,14 @@ export interface AgentConfig {
   privateKey: Hex;
   /// Ceiling this agent will pay for a resource, in settlement-token base units.
   maxAmount: bigint;
+  /**
+   * The deployment this agent trusts, configured out of band.
+   *
+   * Required, and deliberately so. Without it the 402 response would be self-certifying: hash
+   * checks only prove a document matches a quote, not that the quote came from Nota or that the
+   * adapter being authorized is Nota's.
+   */
+  trusted: TrustedDeployment;
   authorizationTtlSeconds?: bigint;
   logger?: AgentLogger;
   fetchImpl?: typeof fetch;
@@ -110,6 +122,23 @@ export async function payAndFetch<T = unknown>(
     throw new PaymentRefused("quote rejected", structural);
   }
 
+  // Before anything is verified against the response, check the response against what this agent
+  // independently believes Nota to be. Everything downstream is a check of internal consistency,
+  // which a hostile endpoint can satisfy trivially.
+  const trustProblems = checkTrustedDeployment(extension, config.trusted);
+
+  if (trustProblems.length > 0) {
+    logger.warn("REFUSING TO PAY: the 402 names contracts this agent does not trust", trustProblems);
+    throw new PaymentRefused("untrusted deployment", trustProblems);
+  }
+
+  const wiringProblems = await checkAdapterWiring(publicClient, extension.adapter, config.trusted);
+
+  if (wiringProblems.length > 0) {
+    logger.warn("REFUSING TO PAY: the adapter is not wired to the trusted deployment", wiringProblems);
+    throw new PaymentRefused("untrusted adapter", wiringProblems);
+  }
+
   const document = await resolveMetadata(extension, doFetch);
 
   // The check the whole extension exists for. x402 alone would have told this agent a price;
@@ -133,9 +162,26 @@ export async function payAndFetch<T = unknown>(
     `verified purchase: ${document.description} for ${document.totalAmount} base units across ${document.items.length} line(s)`,
   );
 
+  // The seller signature has not been checked yet -- recomputing a hash proves nothing about who
+  // signed. The trusted store runs the same validation the settlement will, so a forged
+  // signature, an inactive listing or a spent purchase reference is caught before signing rather
+  // than after the authorization is already in a facilitator's hands.
+  try {
+    await publicClient.readContract({
+      address: config.trusted.store,
+      abi: notaReceiptStoreAbi,
+      functionName: "validateSignedReceiptPurchase",
+      args: [quote, extension.sellerSignature, buyer.address, extension.claimedSigner],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    logger.warn("REFUSING TO PAY: the store rejected this quote", detail);
+    throw new PaymentRefused("quote rejected by the trusted store", [detail ?? "unknown reason"]);
+  }
+
   const tokenDomain = await readTokenDomain(
     publicClient,
-    extension.settlementToken,
+    config.trusted.settlementToken,
     config.chainId,
   );
 
@@ -144,10 +190,10 @@ export async function payAndFetch<T = unknown>(
   const paymentSalt = toHex(randomBytes(32));
 
   const digest = quoteDigest(quote, {
-    chainId: config.chainId,
-    store: extension.store,
-    settlementToken: extension.settlementToken,
-    purchaseRefRegistry: extension.purchaseRefRegistry,
+    chainId: config.trusted.chainId,
+    store: config.trusted.store,
+    settlementToken: config.trusted.settlementToken,
+    purchaseRefRegistry: config.trusted.purchaseRefRegistry,
     seller: extension.seller,
   });
 
@@ -243,6 +289,48 @@ export async function refetchPaidResource<T = unknown>(
   }
 
   return (await response.json()) as PaidResource<T>;
+}
+
+/// Confirms on chain that the adapter is bound to the trusted store, token and registry, so a
+/// look-alike contract at a trusted-looking address cannot pass on its own say-so.
+async function checkAdapterWiring(
+  publicClient: ReturnType<typeof createPublicClient>,
+  adapter: Address,
+  trusted: TrustedDeployment,
+): Promise<string[]> {
+  const problems: string[] = [];
+
+  try {
+    const [store, token, registry] = await Promise.all([
+      publicClient.readContract({ address: adapter, abi: notaX402SettlementAbi, functionName: "STORE" }),
+      publicClient.readContract({
+        address: adapter,
+        abi: notaX402SettlementAbi,
+        functionName: "SETTLEMENT_TOKEN",
+      }),
+      publicClient.readContract({
+        address: adapter,
+        abi: notaX402SettlementAbi,
+        functionName: "PURCHASE_REF_REGISTRY",
+      }),
+    ]);
+
+    if (store.toLowerCase() !== trusted.store.toLowerCase()) {
+      problems.push(`adapter settles through store ${store}, not the trusted ${trusted.store}`);
+    }
+    if (token.toLowerCase() !== trusted.settlementToken.toLowerCase()) {
+      problems.push(`adapter pays in ${token}, not the trusted ${trusted.settlementToken}`);
+    }
+    if (registry.toLowerCase() !== trusted.purchaseRefRegistry.toLowerCase()) {
+      problems.push(`adapter consumes in ${registry}, not the trusted ${trusted.purchaseRefRegistry}`);
+    }
+  } catch (error) {
+    problems.push(
+      `could not read the adapter's wiring: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`,
+    );
+  }
+
+  return problems;
 }
 
 async function proveBuyerControl(

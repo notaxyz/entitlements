@@ -82,6 +82,12 @@ The adapter has no owner, no pause switch, and no upgrade path, and holds no fun
 
 Settlement consumes a purchase reference, which only registry-owner-authorized modules may do. The registry owner must call `setConsumerAuthorization(<adapter address>, true)` before the adapter can settle anything; until then every call reverts with `UnauthorizedConsumer`. That authorization is also a revocation point: the registry owner can disable the adapter at any time without the adapter having a pause switch of its own.
 
+### The buying agent trusts configuration, not the 402
+
+Metadata verification proves a document matches the quote that commits to it. It does not prove the quote came from Nota, that the seller signature is genuine, or that the named adapter is Nota's — a hostile endpoint controls all three and can make them mutually consistent.
+
+An agent therefore configures the deployment it trusts out of band: store, settlement token, registry, and the adapters it will authorize payment to. It rejects a response naming anything else, confirms on chain that the adapter is bound to the trusted store, token and registry, and validates the quote and seller signature through the trusted store before signing. A hash check is a consistency check; only the store can say who signed.
+
 ### Paid does not mean authorised
 
 A purchase reference identifies a purchase; it does not identify who is asking for it. It appears in the 402 response and again in the `X402ReceiptSettled` event, so it is public to anyone watching the chain.

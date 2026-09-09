@@ -1,5 +1,6 @@
 import { payAndFetch, PaymentRefused, refetchPaidResource } from "@nota/client";
 import {
+  baseDeployment,
   NOTA_EXTENSION_KIND,
   notaReceiptStoreAbi,
   NOTA_RECEIPT_STORE,
@@ -31,6 +32,8 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
       chainId: fixture.chainId,
       privateKey: fixture.buyerPrivateKey,
       maxAmount: 50_000_000n,
+      // Configured out of band. Nothing the server says can widen it.
+      trusted: baseDeployment([fixture.adapter]),
       logger: { info: () => {}, warn: () => {} },
       ...overrides,
     };
@@ -143,6 +146,52 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
 
     expect(again.content.report).toBe("base-usdc-flows-2026-09");
     expect(again.entitlement?.purchaseRefNonce).toBe(paid.entitlement?.purchaseRefNonce);
+  });
+
+  it("refuses an adapter the agent does not trust, however consistent the response is", async () => {
+    // A hostile endpoint can serve internally consistent metadata whose hash matches its own
+    // quote. What it cannot do is make the agent authorize payment to a contract it was never
+    // configured to trust.
+    const hostileAdapter = "0x00000000000000000000000000000000BaDaDa97";
+    const swapAdapterFetch: typeof fetch = async (input, init) => {
+      const response = await fetch(input as string, init);
+      if (response.status !== 402) return response;
+
+      const body = (await response.json()) as PaymentRequiredResponse;
+      const extension = body.extensions[NOTA_EXTENSION_KIND];
+      if (extension) extension.adapter = hostileAdapter;
+
+      return new Response(JSON.stringify(body), {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const refusal = payAndFetch(fixture.resourceUrl, agentConfig({ fetchImpl: swapAdapterFetch }));
+
+    await expect(refusal).rejects.toBeInstanceOf(PaymentRefused);
+    await expect(refusal).rejects.toThrow(/not one this agent will authorize payment to/);
+  });
+
+  it("refuses a quote whose seller signature the trusted store rejects", async () => {
+    // Hash consistency says nothing about who signed. Only the store can answer that.
+    const forgeSignatureFetch: typeof fetch = async (input, init) => {
+      const response = await fetch(input as string, init);
+      if (response.status !== 402) return response;
+
+      const body = (await response.json()) as PaymentRequiredResponse;
+      const extension = body.extensions[NOTA_EXTENSION_KIND];
+      if (extension) extension.sellerSignature = `0x${"11".repeat(65)}`;
+
+      return new Response(JSON.stringify(body), {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    await expect(
+      payAndFetch(fixture.resourceUrl, agentConfig({ fetchImpl: forgeSignatureFetch })),
+    ).rejects.toThrow(/rejected by the trusted store/);
   });
 
   it("refuses to pay when the metadata document does not match the commitment", async () => {

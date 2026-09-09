@@ -33,6 +33,8 @@ export const notaReceiptStoreAbi = parseAbi([
   "function getListing(uint256 listingId) view returns (Listing)",
   "function hashPurchaseRef(address seller, uint256 listingId, string rawPurchaseRef, bytes32 purchaseRefNonce) view returns (bytes32)",
   "function hashSignedReceiptQuote(SignedReceiptQuote quote) view returns (bytes32)",
+  "struct SignedReceiptPurchaseValidation { uint256 grossAmount; uint256 protocolFee; uint256 integratorFee; uint256 sellerNet; address protocolFeeRecipient; address integratorFeeRecipient; address seller; bytes32 listingHash; address verifiedSigner; }",
+  "function validateSignedReceiptPurchase(SignedReceiptQuote quote, bytes sellerSignature, address expectedBuyer, address claimedSigner) view returns (SignedReceiptPurchaseValidation)",
   "function purchasesPaused() view returns (bool)",
   "function SETTLEMENT_TOKEN() view returns (address)",
   "function PURCHASE_REF_REGISTRY() view returns (address)",

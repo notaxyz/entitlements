@@ -56,6 +56,22 @@ The buyer recomputes `keccak256(JCS(document))` and compares it with `quote.meta
 
 The agent additionally refuses an unbound quote, a quote bound to a different buyer, a quote above its own spending limit, and an expired one.
 
+### The agent trusts configuration, not the response
+
+Every check the agent makes against a 402 response — recomputing the metadata hash, comparing it
+to `quote.metadataHash`, adding up the itemisation — establishes that the response is internally
+consistent. A hostile endpoint can satisfy all of it: it signs its own quote, over its own
+document, naming its own adapter.
+
+So `AgentConfig.trusted` is required and carries the store, settlement token, registry and the
+adapters the agent will authorize payment to. The response is checked against that, never the
+other way round. The agent then confirms on chain that the adapter is actually wired to the
+trusted store, token and registry, and calls `validateSignedReceiptPurchase` **on the trusted
+store** — which is what authenticates the seller signature, since a hash proves nothing about who
+signed. Only then does it sign an authorization.
+
+An agent configured with no adapters cannot be talked into paying one.
+
 ### `X-PAYER`
 
 A Nota quote binds one buyer, and the adapter rejects unbound quotes outright, so the server cannot issue a quote until it knows who is paying. The agent declares its address in `X-PAYER` on the first request. A request without it gets a 402 carrying the standard `accepts` block and no Nota extension.

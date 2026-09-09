@@ -7,4 +7,5 @@ export * from "./jcs.js";
 export * from "./metadata.js";
 export * from "./nonce.js";
 export * from "./quote.js";
+export * from "./trust.js";
 export * from "./types.js";
