@@ -1,9 +1,11 @@
 import {
   buildPaymentPayload,
   checkExtension,
+  deriveAuthorizationNonce,
   encodePaymentPayload,
   extensionQuote,
   notaChain,
+  quoteDigest,
   readTokenDomain,
   requireNotaExtension,
   signReceiveAuthorization,
@@ -134,6 +136,18 @@ export async function payAndFetch<T = unknown>(
     config.chainId,
   );
 
+  // Public payment-path entropy. Fresh per attempt so a cancelled authorization can be replaced,
+  // and unrelated to the redemption purchaseRefNonce, which this agent has never seen.
+  const paymentSalt = toHex(randomBytes(32));
+
+  const digest = quoteDigest(quote, {
+    chainId: config.chainId,
+    store: extension.store,
+    settlementToken: extension.settlementToken,
+    purchaseRefRegistry: extension.purchaseRefRegistry,
+    seller: extension.seller,
+  });
+
   const authorization: ReceiveAuthorization = {
     from: buyer.address,
     to: extension.adapter,
@@ -141,16 +155,24 @@ export async function payAndFetch<T = unknown>(
     validAfter: 0n,
     validBefore:
       BigInt(Math.floor(Date.now() / 1000)) + (config.authorizationTtlSeconds ?? 600n),
-    // Payment replay protection, scoped to the token. Independent of the redemption
-    // purchaseRefNonce, which this agent has never seen and which is not derivable from this.
-    nonce: toHex(randomBytes(32)),
+    // Derived from the quote digest, not chosen at random. This is what makes the signature
+    // spendable on this quote and no other: buyer, amount and payee all match across two
+    // different sellers' quotes at the same price, but the digest does not.
+    nonce: deriveAuthorizationNonce(digest, paymentSalt),
   };
 
   const buyerSignature = await signReceiveAuthorization(walletClient, authorization, tokenDomain);
 
   logger.info(`signed an authorization for ${quote.amount} to adapter ${extension.adapter}`);
 
-  const settlement = await relay(extension, quote, authorization, buyerSignature, doFetch);
+  const settlement = await relay(
+    extension,
+    quote,
+    authorization,
+    buyerSignature,
+    paymentSalt,
+    doFetch,
+  );
 
   logger.info(`facilitator settled in ${settlement.txHash}, receipt ${settlement.receiptId}`);
 
@@ -208,6 +230,7 @@ async function relay(
   quote: ReturnType<typeof extensionQuote>,
   authorization: ReceiveAuthorization,
   buyerSignature: Hex,
+  paymentSalt: Hex,
   doFetch: typeof fetch,
 ): Promise<SettlementResponse> {
   const request: SettlementRequest = {
@@ -217,6 +240,7 @@ async function relay(
     claimedSigner: extension.claimedSigner,
     authorization: authorizationToWire(authorization),
     buyerSignature,
+    paymentSalt,
   };
 
   const response = await doFetch(`${extension.facilitator}/settle`, {

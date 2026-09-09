@@ -1,6 +1,8 @@
 import {
   authorizationFromWire,
+  deriveAuthorizationNonce,
   notaChain,
+  notaReceiptStoreAbi,
   notaX402SettlementAbi,
   quoteFromWire,
   type SettlementRequest,
@@ -100,12 +102,35 @@ export function createFacilitator(config: FacilitatorConfig): Express {
 
     if (problems.length > 0) throw new SettlementRejected(problems);
 
+    // The adapter re-derives this and rejects a mismatch. Checking it here first turns the most
+    // likely caller mistake into a free 400 with the expected nonce in it, rather than a revert
+    // the relayer paid for.
+    const storeAddress = await publicClient.readContract({
+      address: body.adapter,
+      abi: notaX402SettlementAbi,
+      functionName: "STORE",
+    });
+    const digest = await publicClient.readContract({
+      address: storeAddress,
+      abi: notaReceiptStoreAbi,
+      functionName: "hashSignedReceiptQuote",
+      args: [quote],
+    });
+    const expectedNonce = deriveAuthorizationNonce(digest, body.paymentSalt);
+
+    if (authorization.nonce !== expectedNonce) {
+      throw new SettlementRejected([
+        `authorization nonce ${authorization.nonce} is not bound to this quote (expected ${expectedNonce})`,
+      ]);
+    }
+
     const args = [
       quote,
       body.sellerSignature,
       body.claimedSigner,
       authorization,
       body.buyerSignature,
+      body.paymentSalt,
     ] as const;
 
     // Simulating first means a quote the chain would reject costs the relayer nothing and comes

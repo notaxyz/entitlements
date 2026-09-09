@@ -83,6 +83,9 @@ contract MockNotaReceiptStore is INotaReceiptStore {
 ///      against the deployed store in the fork suite; here `quoteSignatureAccepted` stands in for
 ///      the result so the adapter's own behaviour can be tested deterministically.
 contract MockSignedQuoteStore is MockNotaReceiptStore, INotaSignedQuoteStore {
+    bytes32 internal constant QUOTE_TYPEHASH = keccak256(
+        "SignedReceiptQuote(uint256 listingId,address seller,address buyer,bytes32 purchaseRef,uint256 amount,bytes32 metadataHash,bytes32 agentId,address settlementToken,address purchaseRefRegistry,address integratorFeeRecipient,uint256 integratorFeeAmount,uint64 issuedAt,uint64 expiresAt)"
+    );
     uint16 internal constant BPS_DENOMINATOR = 10_000;
     uint256 internal constant MIN_PURCHASE_AMOUNT = 1e2;
 
@@ -180,6 +183,55 @@ contract MockSignedQuoteStore is MockNotaReceiptStore, INotaSignedQuoteStore {
             listingHash: listing.listingHash,
             verifiedSigner: listing.seller
         });
+    }
+
+    /// @dev Faithful to the deployed store: the same thirteen-member struct hash, the same
+    ///      two-half encoding, and the seller taken from the listing rather than the quote.
+    function hashSignedReceiptQuote(SignedReceiptQuote calldata quote)
+        external
+        view
+        override
+        returns (bytes32)
+    {
+        Listing storage listing = listings[quote.listingId];
+        if (listing.seller == address(0)) revert ListingNotFound();
+
+        bytes32 structHash = keccak256(
+            bytes.concat(
+                abi.encode(
+                    QUOTE_TYPEHASH,
+                    quote.listingId,
+                    listing.seller,
+                    quote.buyer,
+                    quote.purchaseRef,
+                    quote.amount,
+                    quote.metadataHash,
+                    quote.agentId
+                ),
+                abi.encode(
+                    SETTLEMENT_TOKEN,
+                    PURCHASE_REF_REGISTRY,
+                    quote.integratorFeeRecipient,
+                    quote.integratorFeeAmount,
+                    quote.issuedAt,
+                    quote.expiresAt
+                )
+            )
+        );
+
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256(
+                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                ),
+                keccak256("MockNotaReceiptStore"),
+                keccak256("2"),
+                block.chainid,
+                address(this)
+            )
+        );
+
+        return keccak256(abi.encodePacked(hex"1901", domainSeparator, structHash));
     }
 
     function nextReceiptId() external pure override returns (uint256) {

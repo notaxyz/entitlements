@@ -48,24 +48,25 @@ Seller authorization prevents another address from redeeming directly, but it do
 1. The quote passes `NotaReceiptStore.validateSignedReceiptPurchase`, which applies the same validation path as `purchaseSignedReceipt`: the listing exists and is active, the seller signature is valid and comes from the seller or a listing-authorized quote signer, the quote is inside its `issuedAt`/`expiresAt` window and its `MAX_QUOTE_TTL`, the amount and integrator fee are inside protocol bounds, and the purchase reference is not already consumed.
 2. `quote.buyer` is non-zero. The store treats a zero buyer as an unbound quote that any wallet may pay and skips its buyer check entirely; an EIP-3009 authorization must bind to one payer, so the adapter rejects unbound quotes rather than settling against whoever the authorization happens to name.
 3. The store's `purchasesPaused` switch is not set. This is the only check `purchaseSignedReceipt` performs that `validateSignedReceiptPurchase` does not repeat, so the adapter checks it directly and the store owner's kill switch still covers this path.
-4. The buyer authorization is bound to that exact quote: `authorization.from == quote.buyer`, `authorization.value == quote.amount`, and `authorization.to == address(this)`.
+4. The buyer authorization is bound to that exact quote. `authorization.from == quote.buyer`, `authorization.value == quote.amount` and `authorization.to == address(this)` are necessary but **not sufficient**: all three match across two different sellers' quotes at the same price, so on their own they let an observed authorization be lifted and spent on an attacker's own listing. The binding that closes this is the nonce: `authorization.nonce` must equal `keccak256(AUTHORIZATION_NONCE_DOMAIN, storeQuoteDigest, paymentSalt)`. The buyer's signature covers the nonce, and the nonce commits to the store's own EIP-712 quote digest — seller, listing, amount, purchase reference and all — so an authorization is spendable on exactly one quote and nothing else.
 5. Payment is pulled with `receiveWithAuthorization`, never `transferWithAuthorization`. The token requires `msg.sender == to`, so an authorization naming the adapter is executable only through the adapter. A front-runner who observes it cannot execute the transfer standalone.
 6. The purchase reference is consumed exactly once in the shared `PurchaseRefRegistry`, after funds arrive and before any payout.
 7. Proceeds are paid using the fee breakdown the store returned, not a local recomputation. The three legs sum to the gross by construction, so the adapter retains no balance.
 
 The submitter is untrusted. Both signatures are verified on-chain and every amount is bound to the quote, so any address may pay the gas.
 
-### Two unrelated nonces
+### Three values, one of which is secret
 
-Two values in this system are called a nonce. They are unrelated, and **neither is ever derived from the other**.
+Three values in this system look like nonces. Two are public payment-path values and one is the redemption credential. **The secret is never derived from, and never derives, either of the others.**
 
-| | `authorization.nonce` | `purchaseRefNonce` |
-| --- | --- | --- |
-| Purpose | EIP-3009 payment replay protection, scoped to the settlement token | Cryptographic secrecy for the redemption preimage bundle |
-| Lifetime | Public the moment the payment is submitted | Must stay secret until redemption |
-| On-chain | Emitted in `X402ReceiptSettled` and burned in the token's `authorizationState` | Never appears in a quote, in settlement calldata, or in any adapter event |
+| | `authorization.nonce` | `paymentSalt` | `purchaseRefNonce` |
+| --- | --- | --- | --- |
+| Purpose | EIP-3009 replay protection, and the binding of an authorization to one quote | Public entropy folded into that nonce so a cancelled authorization can be replaced | Cryptographic secrecy for the redemption preimage bundle |
+| Secret? | No | No | **Yes, until redemption** |
+| Where it appears | Settlement calldata; emitted in `X402ReceiptSettled` | Settlement calldata | Never in a quote, a 402 response, a settlement request, or any event |
+| Derived from | `keccak256(AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt)` | Fresh CSPRNG output per payment attempt | Fresh CSPRNG output per purchase |
 
-Deriving one from the other would leak the redemption credential to anyone watching the payment, so they must be generated independently from a CSPRNG. The adapter never sees `purchaseRefNonce` and must never be given it. Do not log it, do not put it in metadata, and do not commit it into `metadataHash`.
+`authorization.nonce` being derived is what binds a payment to a quote, and every input to that derivation is public: the quote digest is published in the 402 response, and the salt travels in calldata. Deriving it from `purchaseRefNonce` instead would publish the redemption credential to anyone watching a settlement, so it must never be an input. The adapter never sees `purchaseRefNonce` and must never be given it. Do not log it, do not put it in metadata, and do not commit it into `metadataHash`.
 
 ### What the adapter does not guarantee
 

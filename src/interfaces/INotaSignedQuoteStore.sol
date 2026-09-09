@@ -23,6 +23,15 @@ interface INotaSignedQuoteStore is INotaReceiptStore {
         address claimedSigner
     ) external view returns (SignedReceiptPurchaseValidation memory);
 
+    /// @notice The EIP-712 digest the store signs a quote over, seller included.
+    /// @dev Used to bind a buyer's payment authorization to one specific quote. Taking it from
+    ///      the store rather than recomputing it means the binding cannot drift from what the
+    ///      store actually verifies.
+    function hashSignedReceiptQuote(SignedReceiptQuote calldata quote)
+        external
+        view
+        returns (bytes32);
+
     function SETTLEMENT_TOKEN() external view returns (address);
 
     /// @notice The store's own receipt counter. Unrelated to any adapter's receipt id space.

@@ -34,7 +34,9 @@ Both constructors accept only the receipt-store address and discover the purchas
 
 [`NotaX402Settlement`](./src/NotaX402Settlement.sol) settles a seller-signed Nota quote from a buyer's EIP-3009 `ReceiveWithAuthorization` instead of an `approve` + `transferFrom`. The buyer signs a payment authorization off-chain and never sends a transaction, so a facilitator can submit the settlement and the buyer needs no ETH.
 
-**On-chain security property:** settlement requires both a valid seller-authorized quote and a buyer authorization bound to that exact quote — same payer, same amount, and this adapter as the recipient — and consumes the quote's purchase reference exactly once.
+**On-chain security property:** settlement requires both a valid seller-authorized quote and a buyer authorization cryptographically bound to that exact quote, and consumes the quote's purchase reference exactly once.
+
+The binding matters more than it looks. Matching payer, amount and payee is not enough — all three are identical across two different sellers' quotes at the same price, which would let an observed authorization be lifted and spent on an attacker's own listing. So the EIP-3009 nonce is *derived*: `keccak256(AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt)`, where `quoteDigest` comes from the store's own `hashSignedReceiptQuote`. The buyer signs the nonce, the nonce commits to the whole quote, and the authorization becomes spendable on that quote and nothing else.
 
 The adapter reproduces none of the store's fee math. It calls `validateSignedReceiptPurchase`, which runs the same validation path as `purchaseSignedReceipt`, and pays out the exact `protocolFee` / `integratorFee` / `sellerNet` breakdown that view returns. Those three legs sum to the gross by construction, so the adapter never retains a balance. Zero-value legs are skipped: the deployed store runs a zero protocol fee with a zero fee recipient, so paying that leg unconditionally would transfer to `address(0)`.
 

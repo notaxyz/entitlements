@@ -4,5 +4,6 @@ export * from "./chain.js";
 export * from "./extension.js";
 export * from "./jcs.js";
 export * from "./metadata.js";
+export * from "./nonce.js";
 export * from "./quote.js";
 export * from "./types.js";

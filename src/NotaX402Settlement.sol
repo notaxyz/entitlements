@@ -49,6 +49,11 @@ contract NotaX402Settlement is ReentrancyGuard {
     /// @notice Settlement token, discovered from `STORE`. Must implement EIP-3009.
     IERC20 public immutable SETTLEMENT_TOKEN;
 
+    /// @notice Domain tag for the derived EIP-3009 nonce, so the derivation cannot collide with
+    ///         another protocol deriving a nonce from the same inputs.
+    bytes32 public constant AUTHORIZATION_NONCE_DOMAIN =
+        keccak256("nota.x402.authorizationNonce.v1");
+
     /// @notice Next identifier this adapter will assign.
     /// @dev ADAPTER RECEIPT IDS ARE NOT STORE RECEIPT IDS. This counter is local to this contract
     ///      and is unrelated to `NotaReceiptStore.nextReceiptId`. Adapter id `7` and store receipt
@@ -64,6 +69,7 @@ contract NotaX402Settlement is ReentrancyGuard {
     error AuthorizationPayerMismatch(address authorizationFrom, address quoteBuyer);
     error AuthorizationRecipientMismatch(address authorizationTo, address adapter);
     error AuthorizationValueMismatch(uint256 authorizationValue, uint256 quoteAmount);
+    error AuthorizationNotBoundToQuote(bytes32 provided, bytes32 expected);
     error SettlementAccountingMismatch();
 
     /// @notice Emitted once per successful x402 settlement.
@@ -126,13 +132,16 @@ contract NotaX402Settlement is ReentrancyGuard {
     /// @param authorization Buyer's `ReceiveWithAuthorization` payload, bound to this adapter.
     /// @param buyerSignature Signature over `authorization`, validated by the token. EOA or
     ///        ERC-1271, so a smart-wallet buyer can pay.
+    /// @param paymentSalt Public entropy the buyer folded into the authorization nonce. Not a
+    ///        secret, and never the redemption `purchaseRefNonce`: this travels in calldata.
     /// @return receiptId Identifier in this adapter's own id space. See `nextAdapterReceiptId`.
     function settleWithAuthorization(
         INotaReceiptStore.SignedReceiptQuote calldata quote,
         bytes calldata sellerSignature,
         address claimedSigner,
         ReceiveAuthorization calldata authorization,
-        bytes calldata buyerSignature
+        bytes calldata buyerSignature,
+        bytes32 paymentSalt
     ) external nonReentrant returns (uint256 receiptId) {
         // The store treats a zero buyer as "anyone may pay" and skips its buyer check entirely.
         // An EIP-3009 authorization has to name one payer, so an unbound quote is rejected here
@@ -155,6 +164,21 @@ contract NotaX402Settlement is ReentrancyGuard {
         }
         if (authorization.value != quote.amount) {
             revert AuthorizationValueMismatch(authorization.value, quote.amount);
+        }
+
+        // Buyer, amount and payee are not enough. Every one of them can be identical across two
+        // different sellers' quotes, so on their own they let an observed authorization be lifted
+        // and spent on an attacker's own listing for the same price. The nonce closes that: the
+        // buyer's signature covers it, and it commits to the whole quote digest -- seller,
+        // listing, purchase reference and all -- so an authorization is spendable on exactly one
+        // quote and nothing else.
+        {
+            bytes32 expectedNonce =
+                authorizationNonce(STORE.hashSignedReceiptQuote(quote), paymentSalt);
+
+            if (authorization.nonce != expectedNonce) {
+                revert AuthorizationNotBoundToQuote(authorization.nonce, expectedNonce);
+            }
         }
 
         // The store's own `_quoteRake` guarantees this. It is re-checked because the constructor
@@ -204,7 +228,7 @@ contract NotaX402Settlement is ReentrancyGuard {
         uint256 receiptId,
         address seller,
         INotaReceiptStore.SignedReceiptQuote calldata quote,
-        bytes32 authorizationNonce
+        bytes32 nonce
     ) private {
         emit X402ReceiptSettled(
             receiptId,
@@ -215,8 +239,25 @@ contract NotaX402Settlement is ReentrancyGuard {
             quote.amount,
             quote.metadataHash,
             quote.agentId,
-            authorizationNonce
+            nonce
         );
+    }
+
+    /// @notice The only EIP-3009 nonce this adapter accepts for a quote.
+    /// @dev Callers derive the nonce with this before signing, and the adapter re-derives it
+    ///      before spending. `paymentSalt` is public payment-path entropy chosen freely by the
+    ///      buyer; it exists so a buyer who cancels an authorization can re-authorize the same
+    ///      quote under a fresh nonce.
+    ///
+    ///      It is NOT the redemption `purchaseRefNonce` and must never be derived from it. This
+    ///      value travels in settlement calldata and is public the moment a settlement is
+    ///      submitted; the redemption credential must stay secret. See SECURITY.md.
+    function authorizationNonce(bytes32 quoteDigest, bytes32 paymentSalt)
+        public
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt));
     }
 
     /// @dev Pays the store's own fee breakdown out of the gross this adapter just received. The

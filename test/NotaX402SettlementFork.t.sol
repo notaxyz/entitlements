@@ -25,6 +25,8 @@ contract NotaX402SettlementForkTest is Test {
 
     uint256 internal constant AMOUNT = 10e6;
     uint256 internal constant BUYER_FUNDING = 1000e6;
+    /// Public payment-path entropy. Not a secret, and unrelated to any redemption nonce.
+    bytes32 internal constant PAYMENT_SALT = keccak256("nota-x402-fork-payment-salt");
 
     INotaSignedQuoteStore internal store;
     IPurchaseRefRegistry internal registry;
@@ -43,6 +45,7 @@ contract NotaX402SettlementForkTest is Test {
     bytes32 internal storeDomainSeparator;
     bytes32 internal usdcDomainSeparator;
     bytes32 internal receiveTypehash;
+    bytes32 internal nonceDomain;
 
     event X402ReceiptSettled(
         uint256 indexed receiptId,
@@ -92,6 +95,7 @@ contract NotaX402SettlementForkTest is Test {
         storeDomainSeparator = _buildStoreDomainSeparator();
         usdcDomainSeparator = _buildUsdcDomainSeparator();
         receiveTypehash = usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH();
+        nonceDomain = adapter.AUTHORIZATION_NONCE_DOMAIN();
 
         // The separator is rebuilt from the deployed token's own name, version, and chain id
         // rather than hardcoded, then checked against what the token itself reports.
@@ -130,7 +134,12 @@ contract NotaX402SettlementForkTest is Test {
 
         vm.prank(submitter);
         uint256 receiptId = adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
 
         assertEq(receiptId, 1);
@@ -296,7 +305,8 @@ contract NotaX402SettlementForkTest is Test {
             _signQuote(quote),
             address(0),
             authorization,
-            _signAuthorizationWith(authorization, otherPayerKey)
+            _signAuthorizationWith(authorization, otherPayerKey),
+            PAYMENT_SALT
         );
     }
 
@@ -312,7 +322,12 @@ contract NotaX402SettlementForkTest is Test {
         );
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -328,7 +343,12 @@ contract NotaX402SettlementForkTest is Test {
         );
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -342,7 +362,12 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(NotaX402Settlement.UnboundQuote.selector);
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -355,7 +380,7 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(bytes("ECRecover: invalid signature length"));
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, new bytes(64)
+            quote, _signQuote(quote), address(0), authorization, new bytes(64), PAYMENT_SALT
         );
     }
 
@@ -381,7 +406,8 @@ contract NotaX402SettlementForkTest is Test {
             _signQuote(quote),
             address(0),
             authorization,
-            _signAuthorizationWith(authorization, walletOwnerKey)
+            _signAuthorizationWith(authorization, walletOwnerKey),
+            PAYMENT_SALT
         );
 
         assertEq(IERC20(USDC).balanceOf(wallet), BUYER_FUNDING - AMOUNT, "wallet not debited");
@@ -403,7 +429,12 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(bytes("FiatTokenV2: invalid signature"));
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -411,32 +442,43 @@ contract NotaX402SettlementForkTest is Test {
     // Replay and expiry
     // -------------------------------------------------------------------------
 
-    function test_RevertsWhenAuthorizationNonceIsReplayed() public {
-        INotaReceiptStore.SignedReceiptQuote memory firstQuote = _defaultQuote("nonce-replay-a");
-        NotaX402Settlement.ReceiveAuthorization memory authorization =
-            _defaultAuthorization(firstQuote);
+    /// @dev Binding the nonce to the quote moves this failure earlier than the token: reusing an
+    ///      authorization on another quote is rejected by the adapter, and the same quote cannot
+    ///      reach the token because its purchase reference is already consumed. USDC's own nonce
+    ///      guard stays underneath both, asserted here directly.
+    function test_RevertsWhenAnAuthorizationIsReused() public {
+        INotaReceiptStore.SignedReceiptQuote memory first = _defaultQuote("nonce-replay-a");
+        NotaX402Settlement.ReceiveAuthorization memory authorization = _defaultAuthorization(first);
 
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            firstQuote,
-            _signQuote(firstQuote),
+            first,
+            _signQuote(first),
             address(0),
             authorization,
-            _signAuthorization(authorization)
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
 
-        // A fresh purchaseRef clears the store and the registry, so the only thing left to stop
-        // this is USDC's own nonce bookkeeping.
-        INotaReceiptStore.SignedReceiptQuote memory secondQuote = _defaultQuote("nonce-replay-b");
+        assertTrue(usdc.authorizationState(buyer, authorization.nonce), "nonce burned by USDC");
 
-        vm.expectRevert(bytes("FiatTokenV2: authorization is used or canceled"));
+        INotaReceiptStore.SignedReceiptQuote memory second = _defaultQuote("nonce-replay-b");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotaX402Settlement.AuthorizationNotBoundToQuote.selector,
+                authorization.nonce,
+                keccak256(abi.encode(nonceDomain, _quoteDigest(second), PAYMENT_SALT))
+            )
+        );
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            secondQuote,
-            _signQuote(secondQuote),
+            second,
+            _signQuote(second),
             address(0),
             authorization,
-            _signAuthorization(authorization)
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -453,7 +495,12 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(INotaReceiptStore.PurchaseRefAlreadyUsed.selector);
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
 
         vm.expectRevert(
@@ -475,7 +522,12 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(bytes("FiatTokenV2: authorization is expired"));
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -489,7 +541,12 @@ contract NotaX402SettlementForkTest is Test {
         vm.expectRevert(INotaReceiptStore.QuoteExpired.selector);
         vm.prank(submitter);
         adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -506,8 +563,49 @@ contract NotaX402SettlementForkTest is Test {
             _signQuoteWith(quote, impostorKey),
             address(0),
             authorization,
-            _signAuthorization(authorization)
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
+    }
+
+    /// @dev The cross-seller theft, against the deployed store. The attacker owns a real listing
+    ///      and signs a genuinely valid quote for it; only the nonce binding stops the victim's
+    ///      authorization from paying them.
+    function test_RevertsWhenAuthorizationIsSpentOnAnotherSellersQuote() public {
+        (address attacker, uint256 attackerKey) = makeAddrAndKey("x402-attacker");
+
+        vm.prank(attacker);
+        uint256 attackerListing = store.createListing(
+            keccak256("attacker-listing"), 0, INotaReceiptStore.ListingMode.SignedQuoteOnly
+        );
+
+        INotaReceiptStore.SignedReceiptQuote memory honest = _defaultQuote("victim-quote");
+        NotaX402Settlement.ReceiveAuthorization memory authorization = _defaultAuthorization(honest);
+        bytes memory victimSignature = _signAuthorization(authorization);
+
+        INotaReceiptStore.SignedReceiptQuote memory stolen = _defaultQuote("attacker-quote");
+        stolen.listingId = attackerListing;
+
+        bytes32 attackerDigest = _quoteDigestFor(stolen, attacker);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotaX402Settlement.AuthorizationNotBoundToQuote.selector,
+                authorization.nonce,
+                keccak256(abi.encode(nonceDomain, attackerDigest, PAYMENT_SALT))
+            )
+        );
+        vm.prank(submitter);
+        adapter.settleWithAuthorization(
+            stolen,
+            _signQuoteAsSeller(stolen, attacker, attackerKey),
+            address(0),
+            authorization,
+            victimSignature,
+            PAYMENT_SALT
+        );
+
+        assertEq(IERC20(USDC).balanceOf(attacker), 0, "attacker must not be paid");
     }
 
     // -------------------------------------------------------------------------
@@ -531,7 +629,12 @@ contract NotaX402SettlementForkTest is Test {
         );
         vm.prank(submitter);
         unauthorized.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -547,7 +650,12 @@ contract NotaX402SettlementForkTest is Test {
 
         vm.prank(submitter);
         receiptId = adapter.settleWithAuthorization(
-            quote, _signQuote(quote), address(0), authorization, _signAuthorization(authorization)
+            quote,
+            _signQuote(quote),
+            address(0),
+            authorization,
+            _signAuthorization(authorization),
+            PAYMENT_SALT
         );
     }
 
@@ -581,9 +689,10 @@ contract NotaX402SettlementForkTest is Test {
             value: quote.amount,
             validAfter: 0,
             validBefore: block.timestamp + 1 hours,
-            // Deliberately unrelated to any purchaseRefNonce: this value becomes public the
-            // moment the payment is submitted.
-            nonce: keccak256(abi.encodePacked("x402-authorization-nonce:", quote.purchaseRef))
+            // Derived from the quote digest, which is what stops this authorization being
+            // spent on a different seller's quote. Built only from public values: the digest and
+            // a public salt, never the redemption purchaseRefNonce.
+            nonce: keccak256(abi.encode(nonceDomain, _quoteDigest(quote), PAYMENT_SALT))
         });
     }
 
@@ -601,6 +710,15 @@ contract NotaX402SettlementForkTest is Test {
         returns (bytes memory)
     {
         return _sign(key, _quoteDigest(quote));
+    }
+
+    /// @dev For a quote on someone else's listing, where the store hashes THEIR address in.
+    function _signQuoteAsSeller(
+        INotaReceiptStore.SignedReceiptQuote memory quote,
+        address listingSeller,
+        uint256 key
+    ) internal view returns (bytes memory) {
+        return _sign(key, _quoteDigestFor(quote, listingSeller));
     }
 
     function _signAuthorization(NotaX402Settlement.ReceiveAuthorization memory authorization)
@@ -628,14 +746,31 @@ contract NotaX402SettlementForkTest is Test {
         view
         returns (bytes32)
     {
-        // Encoded in two halves exactly as the store does. Every member is a 32-byte value type,
-        // so the concatenation is byte-identical to a single abi.encode of all thirteen members.
-        bytes32 structHash = keccak256(
+        return _quoteDigestFor(quote, seller);
+    }
+
+    function _quoteDigestFor(
+        INotaReceiptStore.SignedReceiptQuote memory quote,
+        address listingSeller
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(hex"1901", storeDomainSeparator, _structHash(quote, listingSeller))
+        );
+    }
+
+    /// @dev Encoded in two halves exactly as the store does. Every member is a 32-byte value
+    ///      type, so the concatenation is byte-identical to a single abi.encode of all thirteen.
+    function _structHash(INotaReceiptStore.SignedReceiptQuote memory quote, address listingSeller)
+        internal
+        view
+        returns (bytes32)
+    {
+        return keccak256(
             bytes.concat(
                 abi.encode(
                     quoteTypehash,
                     quote.listingId,
-                    seller,
+                    listingSeller,
                     quote.buyer,
                     quote.purchaseRef,
                     quote.amount,
@@ -652,8 +787,6 @@ contract NotaX402SettlementForkTest is Test {
                 )
             )
         );
-
-        return keccak256(abi.encodePacked(hex"1901", storeDomainSeparator, structHash));
     }
 
     function _authorizationDigest(NotaX402Settlement.ReceiveAuthorization memory authorization)

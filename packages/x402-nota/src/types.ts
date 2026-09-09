@@ -160,6 +160,9 @@ export interface SettlementRequest {
   claimedSigner: Address;
   authorization: ReceiveAuthorizationWire;
   buyerSignature: Hex;
+  /// Public entropy the buyer folded into the authorization nonce. Not a secret; never the
+  /// redemption purchaseRefNonce.
+  paymentSalt: Hex;
 }
 
 export interface SettlementResponse {

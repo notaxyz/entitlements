@@ -3,7 +3,9 @@ import { parseAbi, parseAbiItem } from "viem";
 export const notaX402SettlementAbi = parseAbi([
   "struct SignedReceiptQuote { uint256 listingId; address buyer; bytes32 purchaseRef; uint256 amount; bytes32 metadataHash; bytes32 agentId; address integratorFeeRecipient; uint256 integratorFeeAmount; uint64 issuedAt; uint64 expiresAt; }",
   "struct ReceiveAuthorization { address from; address to; uint256 value; uint256 validAfter; uint256 validBefore; bytes32 nonce; }",
-  "function settleWithAuthorization(SignedReceiptQuote quote, bytes sellerSignature, address claimedSigner, ReceiveAuthorization authorization, bytes buyerSignature) returns (uint256 receiptId)",
+  "function settleWithAuthorization(SignedReceiptQuote quote, bytes sellerSignature, address claimedSigner, ReceiveAuthorization authorization, bytes buyerSignature, bytes32 paymentSalt) returns (uint256 receiptId)",
+  "function authorizationNonce(bytes32 quoteDigest, bytes32 paymentSalt) pure returns (bytes32)",
+  "function AUTHORIZATION_NONCE_DOMAIN() view returns (bytes32)",
   "function nextAdapterReceiptId() view returns (uint256)",
   "function STORE() view returns (address)",
   "function PURCHASE_REF_REGISTRY() view returns (address)",
@@ -15,6 +17,7 @@ export const notaX402SettlementAbi = parseAbi([
   "error AuthorizationRecipientMismatch(address authorizationTo, address adapter)",
   "error AuthorizationValueMismatch(uint256 authorizationValue, uint256 quoteAmount)",
   "error SettlementAccountingMismatch()",
+  "error AuthorizationNotBoundToQuote(bytes32 provided, bytes32 expected)",
 ]);
 
 /// Standalone item so `getLogs` returns typed args instead of a hand-cast record.
@@ -23,11 +26,13 @@ export const x402ReceiptSettledEvent = parseAbiItem(
 );
 
 export const notaReceiptStoreAbi = parseAbi([
+  "struct SignedReceiptQuote { uint256 listingId; address buyer; bytes32 purchaseRef; uint256 amount; bytes32 metadataHash; bytes32 agentId; address integratorFeeRecipient; uint256 integratorFeeAmount; uint64 issuedAt; uint64 expiresAt; }",
   "struct Listing { address seller; bytes32 listingHash; uint256 unitPrice; bool active; uint8 mode; }",
   "function createListing(bytes32 listingHash, uint256 unitPrice, uint8 mode) returns (uint256 listingId)",
   "function nextListingId() view returns (uint256)",
   "function getListing(uint256 listingId) view returns (Listing)",
   "function hashPurchaseRef(address seller, uint256 listingId, string rawPurchaseRef, bytes32 purchaseRefNonce) view returns (bytes32)",
+  "function hashSignedReceiptQuote(SignedReceiptQuote quote) view returns (bytes32)",
   "function purchasesPaused() view returns (bool)",
   "function SETTLEMENT_TOKEN() view returns (address)",
   "function PURCHASE_REF_REGISTRY() view returns (address)",
