@@ -11,7 +11,8 @@
     "facilitator": "tsx packages/facilitator/src/server.ts",
     "resource-server": "tsx packages/resource-server/src/server.ts",
     "redemption-server": "tsx packages/resource-server/src/redemption/server.ts",
-    "demo:redemption": "tsx packages/resource-server/scripts/redemption-demo.ts"
+    "demo:redemption": "tsx packages/resource-server/scripts/redemption-demo.ts",
+    "demo:connected": "tsx packages/e2e/scripts/connected-demo.ts"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

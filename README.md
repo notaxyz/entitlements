@@ -458,7 +458,7 @@ hosts need a database or cross-process coordination, which this file store does 
 provide. Keep a separate file per merchant/deployment, protect and back it up as
 secret material, and do not commit it: it contains redemption preimage bundles.
 Memory stores remain available for isolated tests; the server commands never default
-to them. The complete payment-to-redemption demo is still a separate integration task.
+to them. The connected Base-fork demo below uses this file-backed path for both services.
 
 The wire scheme is **`nota-exact`**, not generic x402 `exact`. This is a Nota-aware
 settlement path with an adapter allowlist, not a generalized facilitator. On-chain
@@ -496,6 +496,48 @@ See [SECURITY.md](./SECURITY.md) for detailed assumptions, logging restrictions,
 upstream dependencies, and non-guarantees.
 
 ## Development
+
+### Connected purchase-to-redemption demo
+
+With Node.js 20+, Foundry/Anvil (CI pins 1.8.1), initialized submodules, and `npm ci`:
+
+```sh
+BASE_RPC_URL=https://your-base-mainnet-rpc npm run demo:connected
+```
+
+The command starts a **disposable local Base fork** and uses the real deployed
+Nota store, registry, and USDC code/state as its starting point. It builds and deploys
+the unchanged adapter and redemption contracts locally, authorizes the adapter by
+impersonating the registry owner **on the fork only**, and starts the resource,
+facilitator, and mock-authenticated redemption HTTP services. The buyer is funded
+with fork USDC and no ETH. No wallet keys or pre-existing receipt bundle are needed.
+
+It exercises one purchase end to end:
+
+1. Buyer A receives HTTP 402 with a buyer-bound quote and verifies the purchase terms.
+2. A signs the EIP-3009 authorization; the facilitator submits settlement and pays gas.
+3. A signs an access challenge and receives the resource and preimage bundle.
+4. The resource server restarts; A recovers the same purchase without paying again.
+5. B presents A's exact bundle before redemption: `403 BUYER_MISMATCH`, step 6, no transaction.
+6. A uses that bundle: `201`, with the actual `EntitlementRedeemed` event verified.
+7. A retries: `409 ALREADY_REDEEMED`, step 5, no second redemption transaction.
+
+The runner asserts one quote, one settlement, the same `purchaseRef` throughout,
+USDC movement, and an unchanged buyer transaction count and zero ETH balance.
+It checks anonymous access is denied and that the bundle is absent from the 402,
+settlement request, demo transcript, and redemption audit logs. The transcript prints
+only selected public fields; errors do not dump response bodies or RPC calldata.
+
+**Limits:** requester authentication is still `mock-wallet`, with `humanVerified: false`.
+The bundle is freshly **merchant-generated**, then delivered to the authenticated buyer;
+this is not yet the buyer-generated bundle flow required for the final World demo.
+All printed transaction hashes belong to the local fork, not a public deployment.
+Services, fork state, and the temporary issued-order file are disposed after the run.
+This command requires a working Base RPC and fails rather than silently switching to mocks.
+
+The same runner is exercised by `packages/e2e/test/connected-flow.test.ts`. That
+integration test skips without `BASE_RPC_URL`; deterministic backend and local-EVM
+tests continue to run without an external RPC. Scripts do not automatically load `.env`.
 
 ### Redemption backend demo
 

@@ -1,5 +1,14 @@
 import { createFacilitator } from "@nota/facilitator";
-import { createResourceServer, fileQuoteStore } from "@nota/resource-server";
+import {
+  createResourceServer,
+  fileQuoteStore,
+  createRedemptionApp,
+  MockAgentAuthorizer,
+  ViemRedemptionChain,
+} from "@nota/resource-server";
+import type { AuditRecord } from "../../resource-server/src/redemption/app.js";
+import { redeemWithMockAgent } from "../../resource-server/src/redemption/client.js";
+import type { RedemptionInput } from "../../resource-server/src/redemption/types.js";
 import {
   NOTA_RECEIPT_STORE,
   PURCHASE_REF_REGISTRY,
@@ -9,8 +18,8 @@ import {
   purchaseRefRegistryAbi,
   eip3009Abi,
 } from "@nota/x402-nota";
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
@@ -67,6 +76,11 @@ export interface Fixture {
   resourceUrl: string;
   resourceBaseUrl: string;
   facilitatorUrl: string;
+  redemption: Address;
+  redemptionChain: ViemRedemptionChain;
+  redemptionLogs: AuditRecord[];
+  relayer: Address;
+  redeem(input: RedemptionInput, attacker?: boolean): Promise<Response>;
   publicClient: PublicClient;
   usdcBalance(account: Address): Promise<bigint>;
   /// Tears the resource server down and starts a fresh one on the same port and state.
@@ -79,15 +93,21 @@ export function baseRpcUrl(): string | undefined {
   return url && url.length > 0 ? url : undefined;
 }
 
-async function waitForRpc(url: string, timeoutMs = 90_000): Promise<void> {
+async function waitForRpc(url: string, child: ChildProcess, timeoutMs = 45_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let startupError = false;
+  child.on("error", () => {
+    startupError = true;
+  });
 
   while (Date.now() < deadline) {
+    if (startupError || child.exitCode !== null) throw new Error("Anvil failed to start");
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+        signal: AbortSignal.timeout(2000),
       });
       if (response.ok) return;
     } catch {
@@ -100,7 +120,7 @@ async function waitForRpc(url: string, timeoutMs = 90_000): Promise<void> {
 }
 
 function listen(app: Express, port = 0): Promise<{ url: string; server: Server }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = createServer(app).listen(port, "127.0.0.1", () => {
       const address = server.address();
       if (address === null || typeof address === "string") {
@@ -108,13 +128,14 @@ function listen(app: Express, port = 0): Promise<{ url: string; server: Server }
       }
       resolve({ url: `http://127.0.0.1:${address.port}`, server });
     });
+    server.once("error", reject);
   });
 }
 
 /// The resource server signs its own URL into the metadata document, so it has to know its port
 /// before it starts. Reserve one, release it, and bind it.
 function reservePort(): Promise<number> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const probe = createServer().listen(0, "127.0.0.1", () => {
       const address = probe.address();
       if (address === null || typeof address === "string") {
@@ -123,6 +144,7 @@ function reservePort(): Promise<number> {
       const { port } = address;
       probe.close(() => resolve(port));
     });
+    probe.once("error", reject);
   });
 }
 
@@ -139,7 +161,8 @@ export async function startFixture(): Promise<Fixture> {
   const forkUrl = baseRpcUrl();
   if (!forkUrl) throw new Error("BASE_RPC_URL is not set");
 
-  const port = 8600 + Math.floor(Math.random() * 300);
+  execFileSync("forge", ["build"], { cwd: REPO_ROOT, stdio: "pipe", timeout: 60_000 });
+  const port = await reservePort();
   const rpcUrl = `http://127.0.0.1:${port}`;
 
   const anvil: ChildProcess = spawn(
@@ -148,216 +171,288 @@ export async function startFixture(): Promise<Fixture> {
     { stdio: "ignore" },
   );
 
-  await waitForRpc(rpcUrl);
-
-  const chain = notaChain(CHAIN_ID, rpcUrl);
-  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
-  const relayer = privateKeyToAccount(KEYS.relayer);
-  const seller = privateKeyToAccount(KEYS.seller);
-  const buyer = privateKeyToAccount(KEYS.buyer);
-
-  const deployer = createWalletClient({ account: relayer, chain, transport: http(rpcUrl) });
-  const sellerWallet = createWalletClient({ account: seller, chain, transport: http(rpcUrl) });
-
-  // A signer with code is checked through ERC-1271 rather than ECDSA, which an ordinary key
-  // cannot satisfy. Fail here with the reason rather than deep inside a reverted settlement.
-  for (const [role, address] of [
-    ["seller", seller.address],
-    ["buyer", buyer.address],
-  ] as const) {
-    const code = await publicClient.getCode({ address });
-    if (code && code !== "0x") {
+  const services = new Set<Server>();
+  let stateDir: string | undefined;
+  async function start(app: Express, port = 0) {
+    const service = await listen(app, port);
+    services.add(service.server);
+    return service;
+  }
+  async function stop() {
+    await Promise.all([...services].map(close));
+    services.clear();
+    if (anvil.exitCode === null && anvil.signalCode === null && anvil.pid) {
+      const exited = new Promise<void>((resolve) => anvil.once("exit", () => resolve()));
       anvil.kill();
-      throw new Error(
-        `${role} ${address} has code on this fork (${code.slice(0, 12)}...). ECDSA signatures ` +
-          "from it are checked via ERC-1271 and will be rejected; use a key with no code.",
-      );
+      await exited;
     }
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }
 
-  // The relayer pays gas; the seller pays gas to create its listing. The buyer gets nothing:
-  // needing no ETH is the property this whole path exists to demonstrate.
-  for (const address of [relayer.address, seller.address]) {
+  try {
+    await waitForRpc(rpcUrl, anvil);
+
+    const chain = notaChain(CHAIN_ID, rpcUrl);
+    const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+    const relayer = privateKeyToAccount(KEYS.relayer);
+    const seller = privateKeyToAccount(KEYS.seller);
+    const buyer = privateKeyToAccount(KEYS.buyer);
+
+    const deployer = createWalletClient({ account: relayer, chain, transport: http(rpcUrl) });
+    const sellerWallet = createWalletClient({ account: seller, chain, transport: http(rpcUrl) });
+
+    // A signer with code is checked through ERC-1271 rather than ECDSA, which an ordinary key
+    // cannot satisfy. Fail here with the reason rather than deep inside a reverted settlement.
+    for (const [role, address] of [
+      ["seller", seller.address],
+      ["buyer", buyer.address],
+    ] as const) {
+      const code = await publicClient.getCode({ address });
+      if (code && code !== "0x") {
+        throw new Error(
+          `${role} ${address} has code on this fork (${code.slice(0, 12)}...). ECDSA signatures ` +
+            "from it are checked via ERC-1271 and will be rejected; use a key with no code.",
+        );
+      }
+    }
+
+    // The relayer pays gas; the seller pays gas to create its listing. The buyer gets nothing:
+    // needing no ETH is the property this whole path exists to demonstrate.
+    for (const address of [relayer.address, seller.address]) {
+      await publicClient.request({
+        method: "anvil_setBalance" as never,
+        params: [address, toHex(100n * 10n ** 18n)] as never,
+      });
+    }
+
+    // Deploy the adapter from the Foundry artifact, so the exact compiled contract under test in
+    // the Solidity suites is the one this HTTP path settles through.
+    const artifactPath = path.join(REPO_ROOT, "out/NotaX402Settlement.sol/NotaX402Settlement.json");
+    let artifact: { abi: unknown[]; bytecode: { object: Hex } };
+    try {
+      artifact = JSON.parse(await readFile(artifactPath, "utf8"));
+    } catch {
+      throw new Error(`missing ${artifactPath}; run \`forge build\` first`);
+    }
+
+    const deployHash = await deployer.deployContract({
+      abi: artifact.abi as never,
+      bytecode: artifact.bytecode.object,
+      args: [NOTA_RECEIPT_STORE],
+    });
+    const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+    const adapter = deployReceipt.contractAddress as Address;
+    if (deployReceipt.status !== "success" || !adapter)
+      throw new Error("Adapter deployment failed");
+
+    const redemptionArtifact = JSON.parse(
+      await readFile(
+        path.join(REPO_ROOT, "out/EntitlementRedemption.sol/EntitlementRedemption.json"),
+        "utf8",
+      ),
+    ) as typeof artifact;
+    const redemptionDeployment = await publicClient.waitForTransactionReceipt({
+      hash: await deployer.deployContract({
+        abi: redemptionArtifact.abi as never,
+        bytecode: redemptionArtifact.bytecode.object,
+        args: [NOTA_RECEIPT_STORE, [adapter]],
+      }),
+    });
+    const redemption = redemptionDeployment.contractAddress;
+    if (redemptionDeployment.status !== "success" || !redemption)
+      throw new Error("Redemption deployment failed");
+
+    // The post-deploy step the adapter cannot perform for itself: the registry owner authorizes it
+    // as a consumer. Without this every settlement reverts with UnauthorizedConsumer.
+    const registryOwner = await publicClient.readContract({
+      address: PURCHASE_REF_REGISTRY,
+      abi: purchaseRefRegistryAbi,
+      functionName: "owner",
+    });
+
+    await publicClient.request({
+      method: "anvil_impersonateAccount" as never,
+      params: [registryOwner] as never,
+    });
     await publicClient.request({
       method: "anvil_setBalance" as never,
-      params: [address, toHex(100n * 10n ** 18n)] as never,
+      params: [registryOwner, toHex(10n ** 18n)] as never,
     });
-  }
 
-  // Deploy the adapter from the Foundry artifact, so the exact compiled contract under test in
-  // the Solidity suites is the one this HTTP path settles through.
-  const artifactPath = path.join(
-    REPO_ROOT,
-    "out/NotaX402Settlement.sol/NotaX402Settlement.json",
-  );
-  let artifact: { abi: unknown[]; bytecode: { object: Hex } };
-  try {
-    artifact = JSON.parse(await readFile(artifactPath, "utf8"));
-  } catch {
-    anvil.kill();
-    throw new Error(`missing ${artifactPath}; run \`forge build\` first`);
-  }
+    const ownerWallet = createWalletClient({ chain, transport: http(rpcUrl) });
+    const authorizeHash = await ownerWallet.writeContract({
+      account: registryOwner,
+      address: PURCHASE_REF_REGISTRY,
+      abi: purchaseRefRegistryAbi,
+      functionName: "setConsumerAuthorization",
+      args: [adapter, true],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: authorizeHash });
+    await publicClient.request({
+      method: "anvil_stopImpersonatingAccount" as never,
+      params: [registryOwner] as never,
+    });
 
-  const deployHash = await deployer.deployContract({
-    abi: artifact.abi as never,
-    bytecode: artifact.bytecode.object,
-    args: [NOTA_RECEIPT_STORE],
-  });
-  const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
-  const adapter = deployReceipt.contractAddress as Address;
+    const listingHash = keccak256(toHex("nota-x402-e2e-listing"));
 
-  // The post-deploy step the adapter cannot perform for itself: the registry owner authorizes it
-  // as a consumer. Without this every settlement reverts with UnauthorizedConsumer.
-  const registryOwner = await publicClient.readContract({
-    address: PURCHASE_REF_REGISTRY,
-    abi: purchaseRefRegistryAbi,
-    functionName: "owner",
-  });
+    // createListing assigns nextListingId and then increments it, so the id it will hand out is
+    // whatever the counter reads beforehand.
+    const listingId = await publicClient.readContract({
+      address: NOTA_RECEIPT_STORE,
+      abi: notaReceiptStoreAbi,
+      functionName: "nextListingId",
+    });
 
-  await publicClient.request({
-    method: "anvil_impersonateAccount" as never,
-    params: [registryOwner] as never,
-  });
-  await publicClient.request({
-    method: "anvil_setBalance" as never,
-    params: [registryOwner, toHex(10n ** 18n)] as never,
-  });
+    const createHash = await sellerWallet.writeContract({
+      address: NOTA_RECEIPT_STORE,
+      abi: notaReceiptStoreAbi,
+      functionName: "createListing",
+      args: [listingHash, 0n, 1],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: createHash });
 
-  const ownerWallet = createWalletClient({ chain, transport: http(rpcUrl) });
-  const authorizeHash = await ownerWallet.writeContract({
-    account: registryOwner,
-    address: PURCHASE_REF_REGISTRY,
-    abi: purchaseRefRegistryAbi,
-    functionName: "setConsumerAuthorization",
-    args: [adapter, true],
-  });
-  await publicClient.waitForTransactionReceipt({ hash: authorizeHash });
-  await publicClient.request({
-    method: "anvil_stopImpersonatingAccount" as never,
-    params: [registryOwner] as never,
-  });
+    const listing = await publicClient.readContract({
+      address: NOTA_RECEIPT_STORE,
+      abi: notaReceiptStoreAbi,
+      functionName: "getListing",
+      args: [listingId],
+    });
 
-  const listingHash = keccak256(toHex("nota-x402-e2e-listing"));
+    if (listing.seller.toLowerCase() !== seller.address.toLowerCase()) {
+      throw new Error(`listing ${listingId} is not owned by the test seller`);
+    }
 
-  // createListing assigns nextListingId and then increments it, so the id it will hand out is
-  // whatever the counter reads beforehand.
-  const listingId = await publicClient.readContract({
-    address: NOTA_RECEIPT_STORE,
-    abi: notaReceiptStoreAbi,
-    functionName: "nextListingId",
-  });
+    // Fund the buyer with USDC by writing the balance slot directly.
+    const balanceSlot = keccak256(
+      encodeAbiParameters(
+        [{ type: "address" }, { type: "uint256" }],
+        [buyer.address, USDC_BALANCE_SLOT],
+      ),
+    );
+    await publicClient.request({
+      method: "anvil_setStorageAt" as never,
+      params: [USDC, balanceSlot, pad(toHex(1_000_000_000n))] as never,
+    });
 
-  const createHash = await sellerWallet.writeContract({
-    address: NOTA_RECEIPT_STORE,
-    abi: notaReceiptStoreAbi,
-    functionName: "createListing",
-    args: [listingHash, 0n, 1],
-  });
-  await publicClient.waitForTransactionReceipt({ hash: createHash });
+    const facilitatorApp = createFacilitator({
+      rpcUrl,
+      chainId: CHAIN_ID,
+      privateKey: KEYS.relayer,
+      allowedAdapters: [adapter],
+    });
+    const facilitator = await start(facilitatorApp);
 
-  const listing = await publicClient.readContract({
-    address: NOTA_RECEIPT_STORE,
-    abi: notaReceiptStoreAbi,
-    functionName: "getListing",
-    args: [listingId],
-  });
+    const resourcePortNumber = await reservePort();
+    const resourceBaseUrl = `http://127.0.0.1:${resourcePortNumber}`;
+    stateDir = await mkdtemp(path.join(tmpdir(), "nota-x402-"));
+    const quoteStorePath = path.join(stateDir, "issued-quotes.json");
 
-  if (listing.seller.toLowerCase() !== seller.address.toLowerCase()) {
-    throw new Error(`listing ${listingId} is not owned by the test seller`);
-  }
+    const resourceConfig = {
+      rpcUrl,
+      chainId: CHAIN_ID,
+      store: NOTA_RECEIPT_STORE,
+      settlementToken: USDC,
+      purchaseRefRegistry: PURCHASE_REF_REGISTRY,
+      adapter,
+      facilitatorUrl: facilitator.url,
+      sellerPrivateKey: KEYS.seller,
+      listingId,
+      baseUrl: resourceBaseUrl,
+      fromBlock: deployReceipt.blockNumber,
+    };
 
-  // Fund the buyer with USDC by writing the balance slot directly.
-  const balanceSlot = keccak256(
-    encodeAbiParameters(
-      [{ type: "address" }, { type: "uint256" }],
-      [buyer.address, USDC_BALANCE_SLOT],
-    ),
-  );
-  await publicClient.request({
-    method: "anvil_setStorageAt" as never,
-    params: [USDC, balanceSlot, pad(toHex(1_000_000_000n))] as never,
-  });
+    // File-backed, so a restart in the middle of the suite behaves the way a restart in production
+    // would rather than quietly passing on in-process state.
+    let resource = await start(
+      createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
+      resourcePortNumber,
+    );
 
-  const facilitatorApp = createFacilitator({
-    rpcUrl,
-    chainId: CHAIN_ID,
-    privateKey: KEYS.relayer,
-    allowedAdapters: [adapter],
-  });
-  const facilitator = await listen(facilitatorApp);
+    const redemptionChain = await ViemRedemptionChain.connect({
+      rpcUrl,
+      store: NOTA_RECEIPT_STORE,
+      redemption,
+      adapters: [adapter],
+      sellerPrivateKey: KEYS.seller,
+      confirmations: 1,
+    });
+    const redemptionPort = await reservePort();
+    const redemptionBaseUrl = `http://127.0.0.1:${redemptionPort}`;
+    const authorizer = new MockAgentAuthorizer({
+      resource: `${redemptionBaseUrl}/v1/redemptions`,
+      chainId: CHAIN_ID,
+      redemptionContract: redemption,
+    });
+    const redemptionLogs: AuditRecord[] = [];
+    await start(
+      createRedemptionApp({
+        authorizer,
+        mockChallenges: authorizer,
+        chain: redemptionChain,
+        // Independent store instance, reading orders committed by the resource service.
+        quoteStore: fileQuoteStore(quoteStorePath),
+        logger: (record) => redemptionLogs.push(record),
+      }),
+      redemptionPort,
+    );
 
-  const resourcePortNumber = await reservePort();
-  const resourceBaseUrl = `http://127.0.0.1:${resourcePortNumber}`;
-  const stateDir = await mkdtemp(path.join(tmpdir(), "nota-x402-"));
-  const quoteStorePath = path.join(stateDir, "issued-quotes.json");
-
-  const resourceConfig = {
-    rpcUrl,
-    chainId: CHAIN_ID,
-    store: NOTA_RECEIPT_STORE,
-    settlementToken: USDC,
-    purchaseRefRegistry: PURCHASE_REF_REGISTRY,
-    adapter,
-    facilitatorUrl: facilitator.url,
-    sellerPrivateKey: KEYS.seller,
-    listingId,
-    baseUrl: resourceBaseUrl,
-    fromBlock: deployReceipt.blockNumber,
-  };
-
-  // File-backed, so a restart in the middle of the suite behaves the way a restart in production
-  // would rather than quietly passing on in-process state.
-  let resource = await listen(
-    createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
-    resourcePortNumber,
-  );
-
-  return {
-    rpcUrl,
-    chainId: CHAIN_ID,
-    adapter,
-    listingId,
-    seller: seller.address,
-    buyer: buyer.address,
-    buyerPrivateKey: KEYS.buyer,
-    intruderPrivateKey: KEYS.intruder,
-    resourceBaseUrl,
-    resourceUrl: `${resourceBaseUrl}/reports/base-usdc-flows-2026-09`,
-    facilitatorUrl: facilitator.url,
-    publicClient: publicClient as PublicClient,
-    async usdcBalance(account: Address) {
-      return publicClient.readContract({
-        address: USDC,
-        abi: eip3009Abi,
-        functionName: "balanceOf",
-        args: [account],
-      });
-    },
-    async restartResourceServer() {
-      await close(resource.server);
-      resource = await listen(
-        createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
-        resourcePortNumber,
-      );
-
-      // fetch pools keep-alive sockets per origin, and the ones pointing at the old process are
-      // now dead. The first request through each picks one up and fails; these absorb that so the
-      // test exercises the restart rather than a stale socket.
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const ok = await fetch(`${resourceBaseUrl}/health`).then(
-          (response) => response.ok,
-          () => false,
+    return {
+      rpcUrl,
+      chainId: CHAIN_ID,
+      adapter,
+      listingId,
+      seller: seller.address,
+      buyer: buyer.address,
+      buyerPrivateKey: KEYS.buyer,
+      intruderPrivateKey: KEYS.intruder,
+      resourceBaseUrl,
+      resourceUrl: `${resourceBaseUrl}/reports/base-usdc-flows-2026-09`,
+      facilitatorUrl: facilitator.url,
+      redemption,
+      redemptionChain,
+      redemptionLogs,
+      relayer: relayer.address,
+      redeem: (input, attacker = false) =>
+        redeemWithMockAgent(
+          redemptionBaseUrl,
+          privateKeyToAccount(attacker ? KEYS.intruder : KEYS.buyer),
+          input,
+          { chainId: CHAIN_ID, redemptionContract: redemption },
+        ),
+      publicClient: publicClient as PublicClient,
+      async usdcBalance(account: Address) {
+        return publicClient.readContract({
+          address: USDC,
+          abi: eip3009Abi,
+          functionName: "balanceOf",
+          args: [account],
+        });
+      },
+      async restartResourceServer() {
+        await close(resource.server);
+        services.delete(resource.server);
+        resource = await start(
+          createResourceServer({ ...resourceConfig, quoteStore: fileQuoteStore(quoteStorePath) }),
+          resourcePortNumber,
         );
-        if (ok) return;
-      }
 
-      throw new Error("resource server did not come back after restart");
-    },
-    async stop() {
-      await close(resource.server);
-      await close(facilitator.server);
-      anvil.kill();
-    },
-  };
+        // fetch pools keep-alive sockets per origin, and the ones pointing at the old process are
+        // now dead. The first request through each picks one up and fails; these absorb that so the
+        // test exercises the restart rather than a stale socket.
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const ok = await fetch(`${resourceBaseUrl}/health`).then(
+            (response) => response.ok,
+            () => false,
+          );
+          if (ok) return;
+        }
+
+        throw new Error("resource server did not come back after restart");
+      },
+      stop,
+    };
+  } catch (error) {
+    await stop();
+    throw error;
+  }
 }
-

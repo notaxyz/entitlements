@@ -4,7 +4,8 @@ An agent discovers a paid resource, sees an itemised list of what it is buying, 
 
 **This is one vertical path, not general x402 support.** It settles Nota quotes through `NotaX402Settlement` and nothing else. There is no PayAI integration and no generalized-facilitator compatibility: the facilitator here only submits `settleWithAuthorization`, only to adapters on its allowlist, and the resource server only accepts payment it can find as an `X402ReceiptSettled` event. Pointing this at a non-Nota x402 server, or a non-Nota facilitator at these payloads, will not work and is not meant to.
 
-For how a Nota receipt relates to x402's own Signed Offers & Receipts extension — they compose, and Nota does not replace it — see the [root README](../README.md#relationship-to-the-x402-signed-offers--receipts-extension).
+Nota receipts are distinct from x402's optional Signed Offers & Receipts extension;
+tested interoperability is not claimed. See the [root README](../README.md#backend-architecture).
 
 ## Packages
 
@@ -109,6 +110,19 @@ this does not yet do.
 The resource server does not trust the payment payload. It reads `X402ReceiptSettled` from the adapter for the purchase reference it issued, then checks the seller, buyer, amount, listing, and metadata commitment against the quote it actually offered, and confirms with `PurchaseRefRegistry` that the reference was consumed by the expected adapter. The transaction hash a client may include is used for logging and never as evidence.
 
 ## Running it
+
+For one connected HTTP purchase, authenticated access, resource-server restart, and
+the attacker/buyer/replay redemption sequence against the deployed Nota dependencies
+on a disposable Base fork:
+
+```sh
+BASE_RPC_URL=https://your-base-mainnet-rpc npm run demo:connected
+```
+
+This sends transactions only to localhost and uses explicitly labelled mock-wallet
+authentication, not World verification. The merchant generates the bundle, and the
+redemption attempts reuse exactly the bundle returned by that paid HTTP response.
+See the [demo details](../README.md#connected-purchase-to-redemption-demo).
 
 Deterministic tests need Node.js, Foundry (including Anvil), and initialized submodules,
 but no external RPC. The redemption local-EVM suite always runs and builds its artifacts;

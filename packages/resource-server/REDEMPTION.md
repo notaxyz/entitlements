@@ -28,6 +28,14 @@ by the existing fork suite, not claimed by this demo.
 Order: B steals A's bundle and fails at step 6 while the purchase is still unredeemed;
 A succeeds; A signs a new challenge and fails at step 5. No secrets are printed.
 
+For the **connected** HTTP 402 → settlement → authenticated access → redemption story,
+run `npm run demo:connected` with `BASE_RPC_URL` exported. It uses the real deployed
+Nota/USDC dependencies on a disposable local fork, not the standalone demo's mock
+dependencies. The resource server issues the bundle, persists the order, and releases
+the bundle to A after authenticated payment. The redemption service reads those
+orders through a separate file-store instance. Authentication remains mock-wallet.
+See the [connected demo runbook](../../README.md#connected-purchase-to-redemption-demo).
+
 ## Connect to a configured Base deployment or Base fork
 
 Load secrets through a secure local environment or secret manager, not command-line
