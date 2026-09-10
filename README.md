@@ -1,18 +1,115 @@
 # Nota Entitlements
 
-Nota Entitlements adds two things over Nota's deployed Base-mainnet protocol: one-time entitlement redemption, and an x402 settlement adapter that lets a buyer pay a signed quote with an EIP-3009 authorization. Neither contract has an owner, a pause switch, or an upgrade path, and neither holds funds between transactions.
+Nota binds an on-chain payment to what was purchased. This repository adds a way to
+pay a Nota quote without the buyer holding ETH, and to redeem the resulting
+entitlement once through a seller-authorized transaction.
 
-**On-chain security property:** redemption requires a purchase reference consumed by one of the accepted Nota settlement modules, can happen only once, and must be submitted by the listing seller.
+**On-chain security property:** redemption requires a reference consumed by an accepted
+Nota settlement module, can happen once **per redemption deployment**, and must be
+submitted by the listing seller. The contract does not authenticate the buyer.
 
-`EntitlementRedemption` asks the deployed `NotaReceiptStore` to reconstruct the purchase-reference hash from the listing seller, listing ID, raw reference, and nonce. It then verifies with the deployed `PurchaseRefRegistry` that an accepted settlement module consumed the reference and records that purchase reference exactly once.
+The [redemption endpoint](./packages/resource-server/REDEMPTION.md) enforces the
+separate merchant-side policy: the authenticated wallet must equal the settlement
+buyer before the seller submits redemption. Current authentication uses genuine
+wallet signatures in explicitly labelled mock mode. **World registration and
+AgentBook verification are not implemented or verified.**
 
-The registry attributes a consumption to the module that called it, so a direct store purchase records the store and an x402 purchase records the adapter. Redemption therefore accepts a set of settlement modules — `STORE` plus a constructor list, readable on-chain through `acceptedConsumers()` — rather than a single contract. The set is fixed at construction, so the contract keeps its no-owner property; adding a module later is a new deployment with a longer list, not a source change.
+## Contents
 
-`listingId` is used to resolve and validate the seller, but it is not independently committed into `purchaseRef`. The redemption event therefore omits it. Indexers can join `EntitlementRedeemed` to the original `ReceiptPurchasedV2` event by `purchaseRef` to recover the authoritative listing.
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Contract responsibilities](#contract-responsibilities)
+- [Continuity boundary](#continuity-boundary)
+- [Base mainnet dependencies](#base-mainnet-dependencies)
+- [x402 settlement adapter](#x402-settlement-adapter)
+- [Entitlement redemption](#entitlement-redemption)
+- [References, events, and replay protection](#references-events-and-replay-protection)
+- [Deployment](#deployment)
+- [Backend architecture](#backend-architecture)
+- [Trust boundaries and limitations](#trust-boundaries-and-limitations)
+- [Development](#development)
+- [World integration status](#world-integration-status)
 
-The contract does **not** identify the buyer or the purchasing agent, and it does not enforce the policy that a stolen receipt alone is insufficient. The Day 4 [redemption endpoint](./packages/resource-server/REDEMPTION.md) implements that merchant-side policy: it verifies a signed wallet challenge and requires the authenticated address to equal the settlement buyer before the seller submits redemption. **Current authentication is mock-wallet mode: genuine wallet signatures, but no verified human registration or AgentBook lookup.** World integration remains blocked; see [WORLD_FEEDBACK.md](./WORLD_FEEDBACK.md).
+## Architecture at a glance
 
-See [`SECURITY.md`](./SECURITY.md) for the exact trust boundary and non-guarantees.
+The architecture has three layers: the existing Nota protocol on Base, two new
+Solidity contracts that reuse it, and off-chain services that handle quotes,
+transaction submission, and buyer authentication.
+
+This is a dependency and call map, not a claim that the new contracts are deployed
+on mainnet. The recorded mainnet addresses below belong to the pre-existing baseline.
+Solid arrows are state-changing calls; dotted arrows are reads. USDC arrows denote
+token-contract calls, not transfers of ETH.
+
+```mermaid
+flowchart TB
+    subgraph callers["Off-chain transaction submitters"]
+        F["Facilitator / relayer<br/>Pays settlement gas"]
+        B["Buyer<br/>Existing direct-purchase route"]
+        S["Seller wallet<br/>Submits approved redemptions"]
+    end
+
+    subgraph additions["New Solidity contracts in this repository"]
+        X["NotaX402Settlement<br/>Alternative settlement entry point"]
+        E["EntitlementRedemption<br/>One-time redemption record"]
+    end
+
+    subgraph baseline["Pre-existing dependencies on Base mainnet"]
+        N["NotaReceiptStore<br/>Listings, quotes, canonical hashes"]
+        R["PurchaseRefRegistry<br/>Shared consume-once state"]
+        U["USDC<br/>Balances and payment authorizations"]
+    end
+
+    F -->|settleWithAuthorization| X
+    B -->|purchaseSignedReceipt| N
+    S -->|redeemEntitlement| E
+    X -.->|Validate quote, digest and pause state| N
+    X -->|Consume purchaseRef| R
+    X -->|Pull payment and distribute proceeds| U
+    N -->|Consume direct-purchase reference| R
+    N -->|Settle direct-purchase USDC| U
+    E -.->|Resolve seller and reconstruct purchaseRef| N
+    E -.->|Read consumedBy| R
+```
+
+There is deliberately **no adapter-to-redemption call**. Settlement and redemption
+are separate transactions, connected by `purchaseRef` and shared registry state.
+The adapter does not call the store's purchase function: it calls the store's
+validation views, then settles through USDC and the registry itself.
+
+A reference can be paid through either the original store or an accepted adapter,
+then redeemed through the same entitlement contract. Redemption neither charges
+the buyer again nor consumes the registry reference a second time.
+
+## Contract responsibilities
+
+| Component | Origin | Responsibility | Relevant state / output |
+| --- | --- | --- | --- |
+| `NotaReceiptStore` | Pre-existing | Resolves listings and sellers, validates quotes, supplies canonical hashes and fee breakdowns; also supports direct purchases | Listings; `ReceiptPurchasedV2` on its own purchase path |
+| `PurchaseRefRegistry` | Pre-existing | Allows authorized settlement modules to consume a reference once | `authorizedConsumers`, `isConsumed`, `consumedBy` |
+| USDC | Pre-existing | Holds balances and verifies buyer payment authorizations | Balances; token authorization-use state |
+| [`NotaX402Settlement`](./src/NotaX402Settlement.sol) | New | Settles a bound quote using EIP-3009, consumes its reference, distributes proceeds | `nextAdapterReceiptId`; `X402ReceiptSettled` |
+| [`EntitlementRedemption`](./src/EntitlementRedemption.sol) | New | Checks seller, accepted consumption, and replay; records redemption | Fixed accepted-consumer set; `redeemedAt`; `EntitlementRedeemed` |
+
+Neither new contract is a proxy or an upgrade to the deployed store. Neither has
+an owner, an independent pause switch, or upgradeability. Redemption moves no funds;
+successful adapter settlements distribute the gross payment within the same
+transaction. Tokens accidentally sent to these contracts are not supported deposits
+and have no recovery mechanism.
+
+### Minimal interfaces, not copied protocol code
+
+[`src/interfaces/`](./src/interfaces) contains ABI boundaries to the existing
+deployments, not vendored Nota implementations:
+
+- `INotaReceiptStore`: listing lookup, canonical reference reconstruction, registry lookup.
+- `INotaSignedQuoteStore`: extends that interface with signed-quote validation,
+  quote hashing, token lookup, and store configuration views.
+- `IPurchaseRefRegistry`: consumption and attribution; owner authorization is exposed
+  for deployment tooling and tests, not as an entitlement-contract admin function.
+- `IEIP3009`: the token's `receiveWithAuthorization` surface and related views.
+
+Local Solidity mocks are test fixtures only. Production integration targets the
+deployed ABI; Base fork tests check compatibility with the real contracts.
 
 ## Continuity boundary
 
@@ -32,32 +129,111 @@ Both constructors discover the purchase-reference registry from the receipt stor
 the adapter also discovers the settlement token there. Redemption additionally takes
 the fixed list of accepted settlement consumers.
 
+Production deployment addresses for the new adapter and redemption contracts are
+not recorded in this README. Test fixtures deploy fresh local instances; those
+addresses are not mainnet deployment evidence.
+
 ## x402 settlement adapter
 
 [`NotaX402Settlement`](./src/NotaX402Settlement.sol) settles a seller-signed Nota quote from a buyer's EIP-3009 `ReceiveWithAuthorization` instead of an `approve` + `transferFrom`. The buyer signs a payment authorization off-chain and never sends a transaction, so a facilitator can submit the settlement and the buyer needs no ETH.
 
 **On-chain security property:** settlement requires both a valid seller-authorized quote and a buyer authorization cryptographically bound to that exact quote, and consumes the quote's purchase reference exactly once.
 
-The binding matters more than it looks. Matching payer, amount and payee is not enough — all three are identical across two different sellers' quotes at the same price, which would let an observed authorization be lifted and spent on an attacker's own listing. So the EIP-3009 nonce is *derived*: `keccak256(AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt)`, where `quoteDigest` comes from the store's own `hashSignedReceiptQuote`. The buyer signs the nonce, the nonce commits to the whole quote, and the authorization becomes spendable on that quote and nothing else.
+### Constructor and entry point
 
-The adapter reproduces none of the store's fee math. It calls `validateSignedReceiptPurchase`, which runs the same validation path as `purchaseSignedReceipt`, and pays out the exact `protocolFee` / `integratorFee` / `sellerNet` breakdown that view returns. Those three legs sum to the gross by construction, so the adapter never retains a balance. Zero-value legs are skipped: the deployed store runs a zero protocol fee with a zero fee recipient, so paying that leg unconditionally would transfer to `address(0)`.
+```solidity
+constructor(address storeAddress)
 
-Two behaviours are the adapter's own rather than the store's:
+settleWithAuthorization(
+    SignedReceiptQuote quote,
+    bytes sellerSignature,
+    address claimedSigner,
+    ReceiveAuthorization authorization,
+    bytes buyerSignature,
+    bytes32 paymentSalt
+) returns (uint256 receiptId)
+```
 
-- **Unbound quotes are rejected.** The store treats `quote.buyer == address(0)` as "any wallet may pay" and skips its buyer check entirely. An EIP-3009 authorization must name one payer, so the adapter requires a bound quote.
-- **`purchasesPaused` is checked directly.** It is the only check `purchaseSignedReceipt` performs that `validateSignedReceiptPurchase` does not repeat. The adapter checks it so the store owner's kill switch still covers this settlement path.
+The constructor keeps `STORE`, `PURCHASE_REF_REGISTRY`, and `SETTLEMENT_TOKEN`
+immutable. The seller signs the commercial quote; the buyer signs the token
+authorization. Any submitter can relay them. The facilitator pays gas but does not
+gain authority to change the purchase. `ReentrancyGuard` and `SafeERC20` protect the
+adapter's execution path.
 
-### Relationship to the x402 Signed Offers & Receipts extension
+### Settlement call sequence
 
-x402 already has a Signed Offers & Receipts extension. Nota does not replace it, and the two compose.
+Here, **Adapter** is `NotaX402Settlement`, **Receipt store** is `NotaReceiptStore`,
+and **Registry** is `PurchaseRefRegistry`. The buyer has already checked the quote
+and supplied its payment authorization to the facilitator.
 
-The extension returns a **server-signed offer and delivery receipt, off-chain, after a successful response**. It attests that a particular server made a particular offer and delivered against it.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant F as Facilitator
+    participant X as Adapter
+    participant N as Receipt store
+    participant U as USDC
+    participant R as Registry
 
-A Nota receipt is an **on-chain record bound to settlement**. Its purchase reference is consumed exactly once globally in `PurchaseRefRegistry`, and the purchase it represents can be redeemed exactly once through `EntitlementRedemption`.
+    Note over F,X: Buyer supplies quote and signatures off-chain
+    F->>X: settleWithAuthorization<br/>(facilitator pays gas)
+    X->>N: purchasesPaused<br/>validateSignedReceiptPurchase
+    N-->>X: Seller, gross amount,<br/>fees and recipients
+    X->>N: hashSignedReceiptQuote
+    N-->>X: Canonical quote digest
+    X->>X: Check authorization<br/>and accounting
+    X->>U: receiveWithAuthorization
+    U-->>X: Verify buyer signature<br/>Transfer buyer funds to adapter
+    X->>R: consume(purchaseRef)
+    R-->>X: Consumption attributed to adapter
+    X->>X: Allocate adapter receipt ID
+    X->>U: Pay seller net + nonzero fees
+    X-->>F: X402ReceiptSettled + receiptId
+```
 
-Different artifacts, different jobs: the extension attests to delivery, Nota attests to payment and gives the resulting entitlement a single, globally enforced use. A server can issue both for the same request. Redemption is submitted by the listing seller and the buyer-agent binding is merchant-side policy rather than an on-chain check — see [`SECURITY.md`](./SECURITY.md).
+All on-chain steps inside the adapter transaction are atomic. If quote validation,
+payment, registry consumption, or payout fails, the whole transaction reverts.
+Payment is pulled before consumption; consumption happens before distribution.
 
-The adapter calls `receiveWithAuthorization`, never `transferWithAuthorization`. The token requires `msg.sender == to`, so a signed authorization naming this adapter is executable only through this adapter; an observer who sees it in the mempool cannot execute the transfer standalone.
+### Payment authorization and accounting
+
+Matching payer, amount, and adapter alone is insufficient: different sellers'
+quotes can share all three. The buyer's authorization nonce therefore commits to
+the full quote digest:
+
+```text
+quoteDigest = STORE.hashSignedReceiptQuote(quote)
+authorization.nonce = keccak256(abi.encode(
+    AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt
+))
+```
+
+The adapter re-derives the nonce before spending. The digest includes the seller,
+listing, purchase reference, amount, and other signed terms, so an observed payment
+authorization cannot be lifted onto another quote for the same price.
+
+It also checks `authorization.from == quote.buyer`, `authorization.to == adapter`,
+and `authorization.value == quote.amount`. The store supplies the payout breakdown;
+the adapter does not reproduce the fee math. It checks:
+
+```text
+quote.amount == grossAmount == protocolFee + integratorFee + sellerNet
+```
+
+Successful settlement distributes those amounts. Zero-value fee legs are skipped,
+so a zero protocol fee with a zero recipient does not trigger a transfer.
+
+Three other boundaries matter:
+
+- **Bound buyer:** the adapter rejects `quote.buyer == address(0)`, even though the
+  store supports optional unbound quotes on its own purchase path.
+- **Upstream pause:** it checks `purchasesPaused()` separately because the store's
+  validation view does not enforce that switch.
+- **Recipient-only execution:** it calls `receiveWithAuthorization`, never
+  `transferWithAuthorization`. The token requires `msg.sender == to`, preventing
+  an observer from executing the buyer's authorization standalone. The token's
+  `bytes` overload supports EOA and ERC-1271 buyer signatures; that does not imply
+  smart-wallet support in the mock redemption authorizer.
 
 ### Adapter receipt ids are not store receipt ids
 
@@ -67,48 +243,241 @@ The adapter also does not emit `ReceiptPurchasedV2`. That event belongs to the s
 
 That is a deliberate asymmetry with `EntitlementRedeemed`, which omits the listing id. The difference is what a signature covers: `listingId` is inside the seller-signed quote, so the adapter emits an attested fact, whereas redemption has no signature over a listing id and a seller could emit any listing they liked. Same field, opposite correct answer — neither event should be changed to match the other.
 
-### Required post-deploy step
+## Entitlement redemption
 
-The adapter consumes purchase references in the shared registry, and **the registry owner must authorize it before it can settle anything**:
+### Constructor, state, and checks
 
-```sh
-cast send 0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991 \
-  "setConsumerAuthorization(address,bool)" <adapter address> true
+```solidity
+constructor(address storeAddress, address[] additionalConsumers)
+
+redeemEntitlement(
+    uint256 listingId,
+    string rawPurchaseRef,
+    bytes32 purchaseRefNonce
+) returns (bytes32 purchaseRef)
 ```
 
-That is an owner transaction on the deployed mainnet registry, not something this repository can perform. Until it lands, every `settleWithAuthorization` call reverts with `UnauthorizedConsumer(<adapter address>)`. [`script/DeployNotaX402Settlement.s.sol`](./script/DeployNotaX402Settlement.s.sol) prints the exact call after deploying, and `test_RevertsWhenAdapterIsNotAnAuthorizedConsumer` pins the failure mode so it cannot be forgotten quietly.
+The constructor discovers the registry from the store. It accepts the store itself
+plus the explicitly supplied settlement modules. Zero and duplicate consumers are
+rejected. The set is fixed for that deployment and can be inspected through
+`acceptedConsumers()` and `isAcceptedConsumer(address)`.
+
+At redemption, the contract:
+
+1. Resolves the seller through `STORE.getListing(listingId)`. A nonexistent listing
+   reverts in the store with `ListingNotFound()`.
+2. Requires `msg.sender` to be that seller.
+3. Calls `STORE.hashPurchaseRef(seller, listingId, rawPurchaseRef, purchaseRefNonce)`.
+   It does not implement its own version of the reference hash.
+4. Requires the registry's `consumedBy(purchaseRef)` to be an accepted consumer.
+   Unconsumed references return the zero address, which is never accepted.
+5. Requires `redeemedAt[purchaseRef] == 0`, writes a `uint64` timestamp, and emits
+   `EntitlementRedeemed`.
+
+The contract does **not** know the buyer's identity. It does not read receipt logs,
+call AgentKit, or determine whether off-chain content was delivered.
+
+### Backend policy and contract execution
+
+Payment proof and requester identity are separate checks. The endpoint verifies
+both before it lets the seller wallet call the contract. In the diagram,
+**Redemption** is `EntitlementRedemption`, **Authorizer** is the `AgentAuthorizer`
+interface, and **Base data** groups transaction receipts, the store, and the registry.
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant API as Endpoint
+    participant AUTH as Authorizer
+    participant BASE as Base data
+    participant E as Redemption
+
+    Note over A,AUTH: Current authorizer: signed-wallet mock, not World ID
+    A->>API: POST /v1/redemptions<br/>Proof, bundle, purchaseTxHash
+    API->>AUTH: 1. authorize(request)
+    AUTH-->>API: Verified wallet address<br/>Synthetic mock humanId
+    API->>BASE: 2. Confirm purchase tx<br/>and trusted receipt event
+    API->>BASE: 3. Reconstruct reference<br/>Match receipt, listing, seller
+    API->>BASE: 4. Check consumption<br/>by receipt emitter
+    API->>E: 5. Read redeemedAt
+    alt Already redeemed
+        API-->>A: 409 ALREADY_REDEEMED<br/>No transaction
+    else Not redeemed
+        API->>API: 6. Agent wallet<br/>equals receipt buyer?
+        alt Different wallet
+            API-->>A: 403 BUYER_MISMATCH<br/>No transaction
+        else Same wallet
+            API->>E: 7. Simulate then submit<br/>redeemEntitlement as seller
+            E->>BASE: Read seller, reference,<br/>and consumedBy
+            E->>E: Check caller + replay<br/>Write redeemedAt
+            E-->>API: EntitlementRedeemed
+            API-->>A: 201 after confirmation<br/>and event verification
+        end
+    end
+```
+
+Every failed prerequisite stops the flow. The diagram shows replay and wrong-agent
+branches explicitly because those are the demo's two distinct rejection cases.
+The contract repeats its own checks; backend validation does not replace them.
+Contract-to-store/registry calls execute on-chain, while the endpoint's reads use
+its configured Base RPC.
+
+The endpoint accepts `{ listingId, purchaseTxHash, rawPurchaseRef, purchaseRefNonce }`.
+It recognizes either `ReceiptPurchasedV2` from the configured store or
+`X402ReceiptSettled` from a trusted adapter. An adapter transaction does not need
+to contain the store event as well. The registry consumer must match the actual
+settlement emitter—not merely some other accepted module.
+
+The current [`AgentAuthorizer`](./packages/resource-server/src/redemption/authorizer.ts)
+implementation verifies a single-use EOA signature over the exact request digest,
+endpoint, chain, contract, wallet, and expiry. A future World implementation must
+add AgentKit verification and AgentBook resolution. See the existing [endpoint
+runbook](./packages/resource-server/REDEMPTION.md) for headers and response codes.
+
+## References, events, and replay protection
+
+An entitlement here is a reference plus registry/redemption state—not a newly minted
+NFT or transferable token. The purchase-reference preimage includes the seller, so
+redemption uses a single `mapping(bytes32 => uint64)`, not per-seller nested mappings.
+
+### One join key, separate receipt ID spaces
+
+| Event | Emitter | What it records | Listing attribution |
+| --- | --- | --- | --- |
+| `ReceiptPurchasedV2` | Existing store | A direct Nota purchase | Carries `listingId` |
+| `X402ReceiptSettled` | New adapter | An adapter-settled purchase | Carries the signed quote's `listingId` |
+| `EntitlementRedeemed` | New redemption contract | Seller-authorized use of `purchaseRef` at a timestamp | Omits `listingId`; join to the purchase event |
+
+Use **`purchaseRef`** to join a redemption to its purchase, not `receiptId`.
+`hashPurchaseRef` takes a `listingId` to validate the seller, but that ID is **not
+committed into the reference hash**. The seller-signed quote does commit to a listing.
+The backend therefore checks the requested listing against the authoritative
+settlement event separately.
+
+### Two different one-time-use checks
+
+| Stage | State checked | Meaning |
+| --- | --- | --- |
+| Before settlement | Registry reference unconsumed | Available to be settled |
+| After settlement | `consumedBy` identifies the store or adapter; `redeemedAt == 0` | Paid through that module, not redeemed here |
+| After redemption | Registry consumption unchanged; `redeemedAt > 0` | Redeemed on this entitlement deployment |
+
+Registry consumption prevents duplicate settlement across its consumers. The
+redemption mapping prevents duplicate redemption **within one deployment**. Deploying
+a new redemption contract starts with empty state and does not automatically preserve
+the old contract's replay protection.
+
+### Keep the three nonce-like values separate
+
+| Value | Purpose | Visibility |
+| --- | --- | --- |
+| `purchaseRefNonce` | Cryptographic secrecy for the redemption preimage bundle | Private before redemption; published in redemption calldata |
+| `paymentSalt` | Fresh entropy for a quote-bound payment authorization | Public settlement calldata |
+| `authorization.nonce` | Token-level replay protection, bound to the signed quote | Public settlement calldata and adapter event |
+
+`rawPurchaseRef` is a string and is not necessarily secret. Together with
+`purchaseRefNonce`, it forms the **redemption preimage bundle**. Neither payment nonce
+nor payment salt may be derived from that bundle. Application logs must never contain
+the bundle; sending it to a redemption RPC and publishing redemption calldata are
+separate, intentional disclosures—not long-term secret storage.
+
+## Deployment
+
+The order and the two separate permission checks matter:
+
+1. Deploy `NotaX402Settlement(storeAddress)`.
+2. Have the existing registry owner authorize that adapter to consume references.
+3. Deploy `EntitlementRedemption(storeAddress, [adapter])`; the store is included automatically.
+4. Configure the backend with that redemption address, trusted adapter emitters,
+   Base RPC, and dedicated seller key. Startup checks deployment wiring.
+
+### Operator commands
+
+These are operator instructions, not actions performed by the local demo. Configure
+an appropriately authorized signer: `--broadcast` sends real transactions on the
+selected network and spends gas. Never put private keys in command history.
 
 ```sh
 forge script script/DeployNotaX402Settlement.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
-```
 
-### Deploy order
+# Run separately with the existing registry owner's signer configuration:
+cast send --rpc-url "$BASE_RPC_URL" 0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991 \
+  "setConsumerAuthorization(address,bool)" <adapter-address> true
 
-The adapter must exist before the redemption contract that accepts it, and the accepted set cannot be changed afterwards:
-
-```sh
-forge script script/DeployNotaX402Settlement.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
-# then have the registry owner run the setConsumerAuthorization call printed above
-
-ENTITLEMENT_ACCEPTED_CONSUMERS=<adapter address> \
+# Then deploy redemption with that adapter accepted:
+ENTITLEMENT_ACCEPTED_CONSUMERS=<adapter-address> \
   forge script script/DeployEntitlementRedemption.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
 ```
 
-A redemption contract deployed without the adapter in its list rejects every x402 purchase with `EntitlementNotPaid`, permanently. See [`SECURITY.md`](./SECURITY.md) for what that trust set means and what a later redeployment costs.
+The [adapter deployment script](./script/DeployNotaX402Settlement.s.sol) prints the
+required registry-owner action. The [redemption deployment script](./script/DeployEntitlementRedemption.s.sol)
+prints the fixed accepted-consumer set and warns when no adapters are supplied.
 
-## x402 layer
+Without registry authorization, adapter settlement reverts with `UnauthorizedConsumer`.
+Without inclusion in the redemption deployment, references consumed by that adapter
+fail there with `EntitlementNotPaid`. Neither omission is fixed by changing a backend
+environment variable. Adding a consumer later requires a new redemption deployment
+and a plan for already-redeemed references.
 
-[`packages/`](./packages) holds the TypeScript path an agent actually walks: a paid endpoint that answers with 402 and a Nota extension, an agent that verifies the itemised purchase before signing, and a facilitator that submits the settlement and pays the gas so the buyer needs no ETH. See [`packages/README.md`](./packages/README.md).
+## Backend architecture
 
-It is a Nota-aware settlement path, not general x402 support, and not a generalized facilitator.
+| Module | Role | Relevant boundary |
+| --- | --- | --- |
+| [`packages/x402-nota`](./packages/x402-nota/src) | Shared ABIs, quote types, metadata hashing, nonce derivation, trust configuration | Typed integration with the configured Nota deployment |
+| [`packages/client`](./packages/client/src) | Checks purchase terms and deployment configuration, signs payment, retrieves paid content | Does not trust contract addresses merely because a 402 response names them |
+| [`packages/resource-server`](./packages/resource-server/src/index.ts) | Issues buyer-bound quotes; releases paid content/bundle after buyer authentication | A public purchase reference is not authentication |
+| [`packages/facilitator`](./packages/facilitator/src) | Submits allowed adapter settlements and pays gas | Relayer key is not the buyer's key or redemption authority |
+| [`resource-server/src/redemption`](./packages/resource-server/src/redemption) | Separate redemption HTTP service, authorizer seam, chain verification, seller writer | Enforces authenticated-wallet == receipt-buyer before seller submission |
+
+The existing paid-content server generates its bundle and releases it only after
+authenticated paid access. The standalone redemption demo instead generates a fresh bundle
+on the buyer side before constructing a buyer-bound quote. These are distinct
+bundle-creation flows; the demo is not a production checkout redesign.
+
+The wire scheme is **`nota-exact`**, not generic x402 `exact`. This is a Nota-aware
+settlement path with an adapter allowlist, not a generalized facilitator. On-chain
+Nota receipts are also distinct from off-chain signed offers/delivery attestations;
+the repository does not implement or claim tested interoperability with x402's
+optional Signed Offers & Receipts extension. See [packages/README.md](./packages/README.md)
+for the paid-resource protocol.
+
+## Trust boundaries and limitations
+
+- **Registry authorization and redemption acceptance are different gates.** The
+  registry owner authorizes an adapter to consume new references. The redemption
+  constructor fixes which consumers count as payment. The backend additionally
+  pins which event emitters it trusts.
+- **No new admin does not mean no upstream controls.** Store pause state can stop
+  new adapter purchases; the registry owner can revoke adapter consumption.
+  These do not erase prior consumption or redemption records.
+- **The seller remains trusted for redemption policy.** A seller can bypass the
+  endpoint and call the contract directly. The contract does not enforce buyer
+  binding, World verification, or off-chain fulfillment.
+- **Redeployment changes the replay domain.** A new accepted-consumer list requires
+  a new redemption deployment with empty redemption state. Migration must account
+  for entitlements already redeemed against older addresses.
+- **The current backend is a development milestone.** Mock mode requires explicit
+  opt-in and refuses `NODE_ENV=production`. It supports EOA authentication only,
+  uses in-memory challenges and a single-process seller queue, and needs durable
+  coordination and abuse controls before production operation.
+- **Fail closed on uncertain submission.** A lost broadcast/confirmation response
+  blocks further seller submissions until reconciled. Do not restart and retry
+  blindly. RPC trust, confirmation policy, and reorg risk still apply.
+- **Do not overclaim identity.** Mock signatures prove wallet control, not a verified
+  or unique human. World status is tracked separately below.
+
+See [SECURITY.md](./SECURITY.md) for detailed assumptions, logging restrictions,
+upstream dependencies, and non-guarantees.
 
 ## Development
 
-### Day 4 backend demo
+### Redemption backend demo
 
-With Node.js 20+, dependencies installed (`npm ci`), Foundry, and submodules present:
+With Node.js 20+, Foundry/Anvil, and initialized submodules:
 
 ```sh
+git submodule update --init --recursive
+npm ci
 npm run demo:redemption
 ```
 
@@ -143,20 +512,36 @@ forge build
 forge test
 ```
 
-Tests come in two layers.
+### Verification layers
 
-**Deterministic suites** run against mock store, registry, and EIP-3009 token contracts, need no RPC, and never skip. This is what CI runs, so every commit is checked. `NotaX402Settlement.t.sol` covers the adapter's own logic: authorization binding, the unbound-quote and `purchasesPaused` gates, registry authorization, fee legs including a zero protocol leg that must be skipped rather than sent to `address(0)`, a store whose legs do not sum to the gross, and every event field.
-
-**Fork suites** run the same contracts against the real Base-mainnet deployment and skip when `BASE_RPC_URL` is absent. They cover what only the deployed contracts can prove: real EIP-712 seller signatures against the store's own domain, real EIP-3009 authorizations against deployed USDC, the registry owner authorizing the adapter, and settling through the adapter and then redeeming the result end to end. Both domain separators are rebuilt from what the deployed contracts report rather than hardcoded, and the USDC one is checked against the token's own `DOMAIN_SEPARATOR`.
+| Suite | What it proves | External RPC? |
+| --- | --- | --- |
+| Solidity deterministic tests | Contract guards, authorization binding, fee accounting, events, and replay | No |
+| TypeScript unit / HTTP tests | Signed challenges, ordered policy checks, event decoding, concurrency, log redaction | No |
+| TypeScript local Anvil tests | Real adapter/redemption transactions, no transactions on policy rejection, uncertain-broadcast handling | No; starts its own Anvil |
+| Base fork suites | Compatibility with the deployed store, registry, and USDC, including signature/domain validation | Yes; skip without `BASE_RPC_URL` |
 
 ```sh
-forge test                                              # deterministic only; fork suites skip
-BASE_RPC_URL=https://your-base-mainnet-rpc forge test    # everything
+forge fmt --check
+npm run typecheck
+npm test
+# Include TypeScript Base compatibility tests:
+BASE_RPC_URL=https://your-base-mainnet-rpc npm test
 ```
 
-The mock store does not verify signatures — it exposes the verification *result* as a knob. Real seller-signature verification is a fork-suite concern, because the thing being tested there is the deployed store, not a reimplementation of it.
+The mock store does not verify seller signatures—it exposes the validation result
+as a test control. Deployed-store compatibility is a fork-suite concern. The fork
+tests exercise the real store's seller-signature validation, deployed USDC's
+EIP-3009 authorization checks, registry-owner adapter authorization, and the path
+from adapter settlement to redemption. Domain separators are checked against the
+deployed contracts rather than inferred from the mocks.
 
-CI pins Foundry to the version in [`.github/workflows/test.yml`](./.github/workflows/test.yml). `forge fmt` output differs between versions, so match that version locally or `forge fmt --check` will disagree with CI.
+```sh
+BASE_RPC_URL=https://your-base-mainnet-rpc forge test
+```
+
+CI pins Foundry to the version in [.github/workflows/test.yml](./.github/workflows/test.yml)
+(currently 1.8.1). Match that version locally; formatter output differs between versions.
 
 Receipt #1 supplies the consumed reference used for deployed-contract compatibility testing without committing its redemption preimage bundle:
 
@@ -175,11 +560,25 @@ RECEIPT_1_PURCHASE_REF_NONCE=0x...
 
 Bundle-dependent integration tests skip when either receipt variable is absent. The remaining fork tests still exercise caller authorization, unpaid references, and nonexistent listings against the live deployment.
 
-Never commit `.env` or a redemption preimage bundle.
+Never commit `.env`, a redemption preimage bundle, `out/`, or `cache/`.
+The TypeScript scripts do not automatically load `.env`; export their configuration
+securely as described in the existing [redemption runbook](./packages/resource-server/REDEMPTION.md).
 
-## World demo requirements
+## World integration status
 
-Receipt #1 proves compatibility only. The final World demo must create a new purchase whose buyer agent generates the redemption preimage bundle. Its signed quote must bind `buyer` to the AgentKit wallet; an unbound buyer must not be used for the demo flow.
+`AgentAuthorizer` is the integration seam. `MockAgentAuthorizer` is implemented and
+tested. `WorldAgentKitAuthorizer`, AgentBook lookup, and registered buyer/attacker
+agents remain pending. The mock's `humanId` is synthetic, and responses identify
+`authentication: "mock-wallet"` with `humanVerified: false`.
+
+[WORLD_FEEDBACK.md](./WORLD_FEEDBACK.md) records registration friction, the documentation
+disagreement about registry/network defaults, and the draft questions for World.
+It is not evidence that a message was sent or that registration succeeded.
+
+The final World demonstration must use a new buyer-generated preimage bundle, bind
+the quote's `buyer` to the authenticated AgentKit wallet, and exercise real registered
+agents. Receipt #1 and the local mock demo establish different things and cannot
+substitute for that verification. No automatic World-to-mock downgrade is implemented.
 
 ## License
 
