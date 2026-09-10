@@ -25,3 +25,8 @@ __MACOSX/
 
 # Node
 node_modules/
+
+# Local issued orders contain redemption preimage bundles
+private-data/
+issued-orders.json
+issued-orders.json.*.tmp

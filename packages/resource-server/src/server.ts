@@ -1,10 +1,12 @@
 import type { Address, Hex } from "viem";
 
 import { createResourceServer } from "./index.js";
+import { configuredQuoteStore } from "./store.js";
 
 const port = Number(process.env.RESOURCE_PORT ?? 4020);
 
 createResourceServer({
+  quoteStore: configuredQuoteStore(process.env.QUOTE_STORE_PATH),
   rpcUrl: process.env.RPC_URL ?? "http://127.0.0.1:8545",
   chainId: Number(process.env.CHAIN_ID ?? 8453),
   store: process.env.NOTA_RECEIPT_STORE as Address,

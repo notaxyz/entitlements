@@ -4,6 +4,7 @@ import { isAddressEqual, type Address } from "viem";
 import type { AgentAuthorizer, MockAgentAuthorizer } from "./authorizer.js";
 import type { RedemptionChain } from "./chain.js";
 import { parseInput, RedemptionError, requireAddress } from "./types.js";
+import type { QuoteStore } from "../store.js";
 
 export interface AuditRecord {
   event: "redemption.accepted" | "redemption.rejected";
@@ -15,6 +16,8 @@ export interface AuditRecord {
 export interface RedemptionAppConfig {
   authorizer: AgentAuthorizer;
   chain: RedemptionChain;
+  /** Merchant-issued orders, never reconstructed from requester-supplied expectations. */
+  quoteStore: Pick<QuoteStore, "get">;
   /** Only the mock deployment exposes this development challenge endpoint. */
   mockChallenges?: MockAgentAuthorizer;
   logger?: (record: AuditRecord) => void;
@@ -158,6 +161,31 @@ export function createRedemptionApp(config: RedemptionAppConfig) {
           3,
           422,
           "Settlement listing or seller does not match this redemption",
+        );
+      }
+      const order = await config.quoteStore.get(purchaseRef);
+      if (!order) {
+        throw new RedemptionError(
+          "ORDER_NOT_FOUND",
+          3,
+          422,
+          "No issued order matches this purchase reference",
+        );
+      }
+      const quote = order.quote;
+      if (
+        order.purchaseRef.toLowerCase() !== purchaseRef.toLowerCase() ||
+        quote.purchaseRef.toLowerCase() !== purchaseRef.toLowerCase() ||
+        BigInt(quote.listingId) !== settlement.listingId ||
+        !isAddressEqual(quote.buyer, settlement.buyer) ||
+        BigInt(quote.amount) !== settlement.amount ||
+        quote.metadataHash.toLowerCase() !== settlement.metadataHash.toLowerCase()
+      ) {
+        throw new RedemptionError(
+          "ORDER_MISMATCH",
+          3,
+          422,
+          "Settlement does not match the issued order",
         );
       }
       const result = await exclusive(async () => {

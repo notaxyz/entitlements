@@ -30,6 +30,8 @@ export interface Settlement {
   listingId: bigint;
   seller: Address;
   buyer: Address;
+  amount: bigint;
+  metadataHash: Hex;
 }
 
 export interface RedemptionResult {
@@ -86,6 +88,8 @@ export function decodeSettlements(
         listingId: decoded.args.listingId,
         seller: decoded.args.seller,
         buyer: decoded.args.buyer,
+        amount: decoded.args.amount,
+        metadataHash: decoded.args.metadataHash,
       });
     } catch {
       /* Other events or malformed data cannot count as a Nota settlement. */

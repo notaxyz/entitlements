@@ -70,6 +70,8 @@ describe("trusted Nota settlement event decoding", () => {
           purchaseRef,
           seller,
           buyer,
+          amount: 1_000_000n,
+          metadataHash,
         },
       ]);
     },

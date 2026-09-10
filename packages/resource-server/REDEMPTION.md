@@ -35,6 +35,7 @@ arguments. The script does not automatically load `.env`. Set:
 
 | Variable | Meaning |
 | --- | --- |
+| `QUOTE_STORE_PATH` | Required absolute path to the merchant's issued-order file; same path as the resource server |
 | `AGENT_AUTH_MODE=mock` | Explicit wallet-only development authentication |
 | `BASE_RPC_URL` | Trusted Base RPC; defaults to local `127.0.0.1:8545` |
 | `NOTA_RECEIPT_STORE` | Trusted receipt store address |
@@ -54,6 +55,14 @@ from the store; no separately supplied registry is trusted. Every configured ada
 must be accepted by the redemption deployment and wired to that store/registry.
 An accepted contract consumer not on this server's emitter allowlist is not accepted
 by the endpoint. Never point the local demo's mock dependency addresses at mainnet.
+
+The resource server is the sole writer to `QUOTE_STORE_PATH`; redemption only reads.
+Orders survive restarts, and the reader sees newly saved orders without restarting.
+An otherwise valid paid reference that has no merchant-issued order is rejected.
+Protect the persistent directory and backups: the file contains preimage bundles.
+Do not share one file across unrelated merchants or deployments, or run multiple
+writer processes against it. The local demo supplies fixture orders in memory and
+does not need this environment variable.
 
 Mock mode refuses `NODE_ENV=production`. There is no automatic World-to-mock downgrade.
 The server binds to loopback. Remote operation needs HTTPS and the operational controls
@@ -92,7 +101,8 @@ Verification order after body syntax validation:
    challenge plus successful AgentBook lookup, with no mock fallback.
 2. Require successful, confirmed Base transaction and a trusted Nota settlement event.
 3. Reconstruct through the store's helper; match the event by `purchaseRef`, and match
-   listing and seller separately. Either store or adapter receipt type works.
+   listing and seller separately. Load the issued order and compare reference, buyer,
+   listing, amount, and metadata commitment. Either store or adapter receipt type works.
 4. Require consumption by the matched settlement emitter.
 5. Require `redeemedAt[purchaseRef] == 0`.
 6. Require authenticated agent address == recorded buyer address.
@@ -106,6 +116,9 @@ Response examples (omitting request IDs):
 | Stolen bundle, different authenticated agent | 403 | `BUYER_MISMATCH` | 6 |
 | Already redeemed | 409 | `ALREADY_REDEEMED` | 5 |
 | Bundle not matching purchase | 422 | `PREIMAGE_MISMATCH` | 3 |
+| No merchant-issued order | 422 | `ORDER_NOT_FOUND` | 3 |
+| Receipt differs from issued order | 422 | `ORDER_MISMATCH` | 3 |
+| Order storage unavailable or malformed | 503 | `VERIFICATION_UNAVAILABLE` | 3 |
 | Missing/invalid/expired/reused challenge | 401 | `AGENT_AUTH_FAILED` | 1 |
 | Missing/pending transaction | 409 | `PURCHASE_NOT_MINED` | 2 |
 | RPC/verification unavailable | 503 | `VERIFICATION_UNAVAILABLE` | Current step |

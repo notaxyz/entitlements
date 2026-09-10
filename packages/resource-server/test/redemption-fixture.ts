@@ -24,7 +24,10 @@ import {
   purchaseRefRegistryAbi,
   receiveAuthorizationTypedData,
   signedQuoteTypedData,
+  quoteToWire,
 } from "@nota/x402-nota";
+import { memoryQuoteStore } from "../src/store.js";
+import { issuedOrder } from "./issued-order.js";
 import { MockAgentAuthorizer } from "../src/redemption/authorizer.js";
 import {
   createRedemptionApp,
@@ -199,6 +202,7 @@ export async function startRedemptionFixture() {
       confirmations: 1,
     };
     const redemptionChain = await ViemRedemptionChain.connect(deployment);
+    const quoteStore = memoryQuoteStore();
     const logs: AuditRecord[] = [];
     server = createServer();
     const apiPort = await listen(server);
@@ -211,6 +215,7 @@ export async function startRedemptionFixture() {
     server.on(
       "request",
       createRedemptionApp({
+        quoteStore,
         chain: redemptionChain,
         authorizer,
         mockChallenges: authorizer,
@@ -252,6 +257,7 @@ export async function startRedemptionFixture() {
         settlementToken: token,
         purchaseRefRegistry: registry,
       });
+      await quoteStore.put(issuedOrder(quoteToWire(quote), rawPurchaseRef, purchaseRefNonce));
       // The existing mock store does not validate seller signatures. We still sign its domain;
       // this suite is not evidence of deployed-store signature compatibility (fork suite is).
       const sellerSignature = await seller.signTypedData({

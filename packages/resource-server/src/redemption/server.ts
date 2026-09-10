@@ -3,8 +3,10 @@ import { MockAgentAuthorizer } from "./authorizer.js";
 import { createRedemptionApp } from "./app.js";
 import { ViemRedemptionChain } from "./chain.js";
 import { requireAddress } from "./types.js";
+import { configuredQuoteStore } from "../store.js";
 
 async function main() {
+  const quoteStore = configuredQuoteStore(process.env.QUOTE_STORE_PATH);
   // No silent downgrade when World is unavailable. Mock operation is an explicit opt-in.
   if (process.env.AGENT_AUTH_MODE !== "mock")
     throw new Error(
@@ -38,7 +40,12 @@ async function main() {
     chainId: 8453,
     redemptionContract: redemption,
   });
-  createRedemptionApp({ authorizer, mockChallenges: authorizer, chain }).listen(
+  createRedemptionApp({
+    authorizer,
+    mockChallenges: authorizer,
+    chain,
+    quoteStore,
+  }).listen(
     port,
     "127.0.0.1",
     () => {
@@ -57,7 +64,7 @@ async function main() {
 main().catch(() => {
   // Configuration/RPC exceptions can contain private keys, URLs with credentials, or calldata.
   console.error(
-    "Redemption startup failed. Check explicit mock mode, non-production environment, and Base deployment configuration. No sensitive diagnostic data was logged.",
+    "Redemption startup failed. Check QUOTE_STORE_PATH, explicit mock mode, non-production environment, and Base deployment configuration. No sensitive diagnostic data was logged.",
   );
   process.exitCode = 1;
 });

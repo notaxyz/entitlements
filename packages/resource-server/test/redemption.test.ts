@@ -1,6 +1,8 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keccak256, toHex, zeroAddress, type Address } from "viem";
+import { keccak256, toHex, zeroAddress, zeroHash, type Address } from "viem";
+import { memoryQuoteStore } from "../src/store.js";
+import { issuedOrder } from "./issued-order.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { MockAgentAuthorizer } from "../src/redemption/authorizer.js";
 import {
@@ -28,6 +30,7 @@ const store: Address = "0x1111111111111111111111111111111111111111";
 const adapter: Address = "0x2222222222222222222222222222222222222222";
 const redemption: Address = "0x3333333333333333333333333333333333333333";
 const purchaseRef = keccak256(toHex("consumed test reference"));
+const metadataHash = keccak256(toHex("expected metadata"));
 const input: RedemptionInput = {
   listingId: "1",
   purchaseTxHash: keccak256(toHex("purchase transaction")),
@@ -52,6 +55,12 @@ async function fixture(kind: Settlement["kind"] = "X402ReceiptSettled") {
   const trace: string[] = [];
   const logs: AuditRecord[] = [];
   let redeemed = 0n;
+  const quoteStore = memoryQuoteStore();
+  await quoteStore.put(issuedOrder({
+    purchaseRef, listingId: "1", buyer: buyer.address, amount: "1000000",
+    metadataHash, agentId: zeroHash, integratorFeeRecipient: zeroAddress,
+    integratorFeeAmount: "0", issuedAt: "1000", expiresAt: "2000",
+  }, input.rawPurchaseRef, input.purchaseRefNonce));
   const chain: RedemptionChain = {
     seller,
     settlements: vi.fn(async () => {
@@ -64,6 +73,8 @@ async function fixture(kind: Settlement["kind"] = "X402ReceiptSettled") {
           seller,
           buyer: buyer.address,
           listingId: 1n,
+          amount: 1_000_000n,
+          metadataHash,
         },
       ];
     }),
@@ -110,6 +121,7 @@ async function fixture(kind: Settlement["kind"] = "X402ReceiptSettled") {
     redemptionContract: redemption,
   });
   const app = createRedemptionApp({
+    quoteStore,
     chain,
     mockChallenges: authorizer,
     logger: (record) => logs.push(record),
@@ -126,7 +138,7 @@ async function fixture(kind: Settlement["kind"] = "X402ReceiptSettled") {
       chainId: 8453,
       redemptionContract: redemption,
     });
-  return { chain, authorizer, trace, logs, url, redeem };
+  return { chain, authorizer, trace, logs, url, redeem, quoteStore };
 }
 
 describe("redemption endpoint — deterministic real EOA signatures, mock chain", () => {
@@ -263,6 +275,58 @@ describe("redemption endpoint — deterministic real EOA signatures, mock chain"
     });
     expect(f.chain.submit).not.toHaveBeenCalled();
   });
+
+  it.each(["ReceiptPurchasedV2", "X402ReceiptSettled"] as const)(
+    "rejects amount and metadata mismatches against the expected order for %s",
+    async (kind) => {
+      for (const change of [{ amount: 999_999n }, { metadataHash: zeroHash }]) {
+        const f = await fixture(kind);
+        const [event] = await f.chain.settlements(input.purchaseTxHash);
+        vi.mocked(f.chain.settlements).mockResolvedValue([{ ...event!, ...change }]);
+        const response = await f.redeem();
+        expect(response.status).toBe(422);
+        expect(await response.json()).toMatchObject({ code: "ORDER_MISMATCH", step: 3 });
+        expect(f.chain.consumedBy).not.toHaveBeenCalled();
+        expect(f.chain.submit).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("rejects a paid reference absent from the merchant's issued orders", async () => {
+    const f = await fixture();
+    vi.spyOn(f.quoteStore, "get").mockResolvedValue(undefined);
+    const response = await f.redeem();
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ code: "ORDER_NOT_FOUND", step: 3 });
+    expect(f.chain.submit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and redacts storage errors", async () => {
+    const f = await fixture();
+    vi.spyOn(f.quoteStore, "get").mockRejectedValue(
+      new Error(`${input.rawPurchaseRef} ${input.purchaseRefNonce}`),
+    );
+    const response = await f.redeem();
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(text).toContain("VERIFICATION_UNAVAILABLE");
+    for (const secret of [input.rawPurchaseRef, input.purchaseRefNonce]) {
+      expect(text + JSON.stringify(f.logs)).not.toContain(secret);
+    }
+    expect(f.chain.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["buyer", "listingId", "purchaseRef"] as const)(
+    "rejects an order with mismatched %s", async (field) => {
+      const f = await fixture();
+      const order = (await f.quoteStore.get(purchaseRef))!;
+      if (field === "listingId") order.quote.listingId = "2";
+      else order.quote[field] = field === "buyer" ? attacker.address : zeroHash;
+      vi.spyOn(f.quoteStore, "get").mockResolvedValue(order);
+      expect(await (await f.redeem()).json()).toMatchObject({ code: "ORDER_MISMATCH", step: 3 });
+      expect(f.chain.submit).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["settlements", "consumedBy", "redeemedAt", "submit"] as const)(
     "fails closed on %s failure without leaking RPC calldata",

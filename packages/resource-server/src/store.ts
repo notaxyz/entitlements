@@ -1,5 +1,6 @@
 import type { CheckoutMetadata, SignedReceiptQuoteWire } from "@nota/x402-nota";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Hex } from "viem";
 
@@ -30,12 +31,28 @@ export function memoryQuoteStore(): QuoteStore {
 
   return {
     async get(purchaseRef) {
-      return records.get(purchaseRef);
+      return structuredClone(records.get(purchaseRef.toLowerCase() as Hex));
     },
     async put(record) {
-      records.set(record.purchaseRef, record);
+      records.set(
+        record.purchaseRef.toLowerCase() as Hex,
+        structuredClone(record),
+      );
     },
   };
+}
+
+// Serialize all instances for the same resolved path in this process. This is NOT a
+// cross-process writer lock: run one resource-server writer, with read-only redemption workers.
+const writes = new Map<string, Promise<void>>();
+
+export function configuredQuoteStore(filePath: string | undefined): QuoteStore {
+  if (!filePath || !path.isAbsolute(filePath)) {
+    throw new Error(
+      "QUOTE_STORE_PATH must be an absolute path to persistent issued orders",
+    );
+  }
+  return fileQuoteStore(filePath);
 }
 
 /**
@@ -50,41 +67,69 @@ export function memoryQuoteStore(): QuoteStore {
  * what a production seller backend should do.
  */
 export function fileQuoteStore(filePath: string): QuoteStore {
-  const records = new Map<Hex, IssuedQuoteRecord>();
-  let loaded: Promise<void> | undefined;
+  const target = path.resolve(filePath);
 
-  async function load() {
+  async function readRecords(): Promise<Map<string, IssuedQuoteRecord>> {
     try {
-      const raw = await readFile(filePath, "utf8");
-      for (const record of JSON.parse(raw) as IssuedQuoteRecord[]) {
-        records.set(record.purchaseRef, record);
+      const parsed: unknown = JSON.parse(await readFile(target, "utf8"));
+      if (!Array.isArray(parsed)) throw new Error();
+      const records = new Map<string, IssuedQuoteRecord>();
+      for (const record of parsed as IssuedQuoteRecord[]) {
+        if (
+          !record ||
+          typeof record.purchaseRef !== "string" ||
+          !/^0x[0-9a-fA-F]{64}$/.test(record.purchaseRef) ||
+          records.has(record.purchaseRef.toLowerCase())
+        ) throw new Error();
+        records.set(record.purchaseRef.toLowerCase(), record);
       }
+      return records;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+      // JSON parse errors can include the document, which contains redemption secrets.
+      throw new Error("Issued order storage unavailable");
     }
-  }
-
-  async function ready() {
-    loaded ??= load();
-    await loaded;
   }
 
   return {
     async get(purchaseRef) {
-      await ready();
-      return records.get(purchaseRef);
+      // No cached snapshot: a separate redemption process must see newly committed orders.
+      return (await readRecords()).get(purchaseRef.toLowerCase());
     },
     async put(record) {
-      await ready();
-      records.set(record.purchaseRef, record);
-
-      await mkdir(path.dirname(filePath), { recursive: true });
-
-      // Written to a sibling and renamed so a crash mid-write cannot truncate the only copy of a
-      // redemption credential.
-      const temporary = `${filePath}.${process.pid}.tmp`;
-      await writeFile(temporary, JSON.stringify([...records.values()], null, 2), { mode: 0o600 });
-      await rename(temporary, filePath);
+      const snapshot = structuredClone(record);
+      const result = (writes.get(target) ?? Promise.resolve()).then(async () => {
+        const records = await readRecords();
+        const key = snapshot.purchaseRef.toLowerCase();
+        const existing = records.get(key);
+        if (existing && JSON.stringify(existing) !== JSON.stringify(snapshot)) {
+          throw new Error("Cannot replace an issued order");
+        }
+        records.set(key, snapshot);
+        const temporary = `${target}.${randomUUID()}.tmp`;
+        try {
+          await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+          // Readers see the previous complete snapshot until rename succeeds. Failed writes
+          // never enter a memory cache or cause a quote to be handed out as persisted.
+          await writeFile(
+            temporary,
+            JSON.stringify([...records.values()], null, 2),
+            { mode: 0o600, flag: "wx" },
+          );
+          await rename(temporary, target);
+        } catch {
+          throw new Error("Could not persist issued order");
+        } finally {
+          await unlink(temporary).catch(() => {});
+        }
+      });
+      const tail = result.catch(() => {});
+      writes.set(target, tail);
+      try {
+        await result;
+      } finally {
+        if (writes.get(target) === tail) writes.delete(target);
+      }
     },
   };
 }

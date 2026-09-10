@@ -136,10 +136,17 @@ RPC_URL=http://127.0.0.1:8545 NOTA_X402_ADAPTER=0x... FACILITATOR_PRIVATE_KEY=0x
 ```
 
 ```sh
-RPC_URL=http://127.0.0.1:8545 NOTA_X402_ADAPTER=0x... SELLER_PRIVATE_KEY=0x... LISTING_ID=1 \
+QUOTE_STORE_PATH=/absolute/path/to/private-data/issued-orders.json \
+  RPC_URL=http://127.0.0.1:8545 NOTA_X402_ADAPTER=0x... SELLER_PRIVATE_KEY=0x... LISTING_ID=1 \
   NOTA_RECEIPT_STORE=0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88 \
   SETTLEMENT_TOKEN=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
   PURCHASE_REF_REGISTRY=0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991 npm run resource-server
 ```
 
 Nothing here is published to npm; the packages are workspace-local.
+
+The resource-server command requires persistent issued-order storage; it does not
+fall back to memory. Configure the redemption service with the same absolute
+`QUOTE_STORE_PATH`, use one resource-server writer, and keep the file and backups
+private. Orders are saved before signed quotes leave the server. See the root
+[persistence notes](../README.md#persistent-issued-orders) for limits.

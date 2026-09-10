@@ -60,6 +60,11 @@ An adapter transaction need not also emit the store event. Ambiguous claims for 
 same reference fail closed. The supplied listing must match the authoritative event,
 because the purchase reference alone does not commit to a listing.
 
+The endpoint must also find the merchant-issued order in its configured order store.
+At step 3 it compares the receipt's amount, metadata commitment, buyer, listing, and
+purchase reference against that order. Unknown orders and mismatches fail before
+seller submission. These expected values never come from the redemption request.
+
 The registry must report consumption by that exact settlement emitter, not merely
 some authorized or accepted consumer. State is checked for prior redemption before
 the authenticated address is compared to the receipt buyer. Only then does the seller
@@ -73,6 +78,14 @@ World registration, AgentBook resolution, and human-backed claims remain unverif
 
 Operational limits:
 
+- Both server commands require the same absolute `QUOTE_STORE_PATH` on persistent
+  storage. Orders are committed before quotes are returned. File writes are serialized
+  within one process and published by atomic rename; readers do not cache snapshots.
+  Run one resource-server writer per file, with read-only redemption consumers.
+  This is not a multi-process writer lock or a durable transaction-submission journal.
+  Files contain unencrypted preimage bundles with owner-only permissions: use a
+  private directory, protect backups, and isolate files by merchant/deployment.
+  Missing orders, failed reads, or mismatched terms never authorize redemption.
 - A trusted RPC and trusted deployment configuration are required. Startup verifies
   Base chain ID and store/registry/adapter/redemption wiring. Confirmations reduce
   reorg exposure but do not eliminate it; default is two, not a finality guarantee.

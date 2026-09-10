@@ -76,6 +76,14 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   const app = express();
   app.use(express.json({ limit: "256kb" }));
 
+  const safe = (handler: (request: Request, response: Response) => Promise<void>) =>
+    (request: Request, response: Response) => {
+      void handler(request, response).catch(() => {
+        // Storage/RPC errors may contain the preimage bundle. Never expose diagnostics.
+        response.status(503).json({ error: "could not safely process the request" });
+      });
+    };
+
   app.get("/health", (_request: Request, response: Response) => {
     response.json({ ok: true, seller: seller.address, listingId: config.listingId.toString() });
   });
@@ -85,7 +93,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
    * nothing. Only a signature over it, from the wallet the settlement records as the buyer,
    * releases the content.
    */
-  app.post("/access/challenge", async (request: Request, response: Response) => {
+  app.post("/access/challenge", safe(async (request: Request, response: Response) => {
     const purchaseRef = (request.body as { purchaseRef?: Hex })?.purchaseRef;
     const record = purchaseRef ? await issued.get(purchaseRef) : undefined;
 
@@ -105,9 +113,9 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
     challenges.set(challenge.challenge, challenge);
     response.json(challenge);
-  });
+  }));
 
-  app.get("/reports/:id", async (request: Request, response: Response) => {
+  app.get("/reports/:id", safe(async (request: Request, response: Response) => {
     const entry = CATALOG[request.params.id ?? ""];
 
     if (!entry) {
@@ -139,13 +147,12 @@ export function createResourceServer(config: ResourceServerConfig): Express {
 
     try {
       response.status(402).json(await buildPaymentRequired(payer, resource, entry.id));
-    } catch (error) {
+    } catch {
       response.status(500).json({
         error: "could not issue a quote",
-        detail: error instanceof Error ? error.message : String(error),
       });
     }
-  });
+  }));
 
   function acceptsBlock(resource: string, description: string, amount: bigint) {
     return {

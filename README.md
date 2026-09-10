@@ -328,6 +328,11 @@ It recognizes either `ReceiptPurchasedV2` from the configured store or
 to contain the store event as well. The registry consumer must match the actual
 settlement emitter—not merely some other accepted module.
 
+Before checking consumption, the endpoint also loads the merchant's issued order
+by `purchaseRef` and compares the receipt's amount, metadata commitment, listing,
+and buyer with that order. An unknown order or a mismatch is rejected at step 3;
+the request cannot supply its own expected amount or metadata.
+
 The current [`AgentAuthorizer`](./packages/resource-server/src/redemption/authorizer.ts)
 implementation verifies a single-use EOA signature over the exact request digest,
 endpoint, chain, contract, wallet, and expiry. A future World implementation must
@@ -433,6 +438,27 @@ The existing paid-content server generates its bundle and releases it only after
 authenticated paid access. The standalone redemption demo instead generates a fresh bundle
 on the buyer side before constructing a buyer-bound quote. These are distinct
 bundle-creation flows; the demo is not a production checkout redesign.
+
+### Persistent issued orders
+
+Both server entry points require **`QUOTE_STORE_PATH`**, set to the same absolute
+path on persistent storage (for example, an `issued-orders.json` file in a private
+directory). The resource server saves each order **before returning its signed
+quote**. Restarting the service preserves the order and its bundle; outstanding
+authentication challenges still expire or are lost on restart.
+
+The file store serializes writes within one process and atomically replaces the
+file, with owner-only file permissions. Failed writes are not published as saved
+orders. Redemption reads the file afresh, so a separately running service sees new
+orders without a restart. Missing orders fail closed; corrupt or unreadable storage
+produces a sanitized error, not an automatic memory fallback.
+
+Run **one resource-server writer per order file**. Multiple writer processes or
+hosts need a database or cross-process coordination, which this file store does not
+provide. Keep a separate file per merchant/deployment, protect and back it up as
+secret material, and do not commit it: it contains redemption preimage bundles.
+Memory stores remain available for isolated tests; the server commands never default
+to them. The complete payment-to-redemption demo is still a separate integration task.
 
 The wire scheme is **`nota-exact`**, not generic x402 `exact`. This is a Nota-aware
 settlement path with an adapter allowlist, not a generalized facilitator. On-chain
