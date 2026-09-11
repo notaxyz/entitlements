@@ -36,8 +36,9 @@ The architecture has three layers: the existing Nota protocol on Base, two new
 Solidity contracts that reuse it, and off-chain services that handle quotes,
 transaction submission, and buyer authentication.
 
-This is a dependency and call map, not a claim that the new contracts are deployed
-on mainnet. The recorded mainnet addresses below belong to the pre-existing baseline.
+This is a dependency and call map. Both new contracts are now deployed and source-verified
+on Base mainnet; the deployment record below distinguishes them from the pre-existing baseline.
+Deployment alone does not mean the backend, World authentication, or live subgraph is ready.
 Solid arrows are state-changing calls; dotted arrows are reads. USDC arrows denote
 token-contract calls, not transfers of ETH.
 
@@ -130,9 +131,28 @@ Both constructors discover the purchase-reference registry from the receipt stor
 the adapter also discovers the settlement token there. Redemption additionally takes
 the fixed list of accepted settlement consumers.
 
-Production deployment addresses for the new adapter and redemption contracts are
-not recorded in this README. Test fixtures deploy fresh local instances; those
-addresses are not mainnet deployment evidence.
+### New Base mainnet deployments
+
+The two new contracts were deployed on **2026-09-11** from commit
+`d618b3dabcc2aa861ac0350ab728f5e6ba8b56c6`. Full transaction hashes, block hashes,
+UTC timestamps, constructor arguments, compiler settings, and bytecode hashes are
+recorded in [`deployments/base.json`](./deployments/base.json), using the field
+conventions of the existing contracts repository. The original `BASELINE.md` is unchanged.
+
+| Contract | Verified address | Deployment block |
+| --- | --- | --- |
+| `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) | [51,184,074](https://basescan.org/tx/0xd305282b6ea7d7a5efbf3000f987652a01b858b6be5c63207902e2ae1c72d984) |
+| `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) | [51,184,221](https://basescan.org/tx/0x4a53b7d49bf748fb0f2b389cc19e8e8fdfc6888d6145f46d33766f4bd846a3da) |
+
+The registry owner authorized the adapter in [transaction `0xe4bd8708…632d7f`](https://basescan.org/tx/0xe4bd870886def028ea45a0aed2c319f327dd23324b7c389eec04490b1f632d7f)
+at block **51,184,168**. RPC checks confirmed both contracts' store/registry wiring,
+the adapter's USDC address, and redemption's fixed accepted set of **store + adapter**.
+Both creation transactions match the local compiled artifacts plus the recorded
+constructor arguments. Source verification is not a security audit.
+
+This records deployment and authorization, **not yet a new public purchase/redemption
+demo, published subgraph, or World-verified agent flow**. Test fixtures still deploy
+fresh local instances; their addresses and transaction hashes are not public evidence.
 
 ## x402 settlement adapter
 

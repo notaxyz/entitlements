@@ -1,0 +1,97 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "deployedAt": "2026-09-11T20:11:35Z",
+  "deploymentCompletedAt": "2026-09-11T20:16:29Z",
+  "evidenceCheckedAt": "2026-09-11T20:25:26Z",
+  "gitCommit": "d618b3dabcc2aa861ac0350ab728f5e6ba8b56c6",
+  "deployer": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+  "settlementToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "settlementTokenSymbol": "USDC",
+  "compiler": {
+    "version": "0.8.24+commit.e11b9ed9",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "viaIR": false,
+    "metadataBytecodeHash": "ipfs"
+  },
+  "baseline": {
+    "repository": "https://github.com/notaxyz/contracts",
+    "gitCommit": "238cb210e1342892c122b794563b1db99bd4b891",
+    "note": "The receipt store, registry, and USDC pre-exist this repository and were not redeployed."
+  },
+  "notaReceiptStore": {
+    "address": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "preExisting": true
+  },
+  "purchaseRefRegistry": {
+    "address": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "owner": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+    "preExisting": true
+  },
+  "notaX402Settlement": {
+    "address": "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8",
+    "deployTxHash": "0xd305282b6ea7d7a5efbf3000f987652a01b858b6be5c63207902e2ae1c72d984",
+    "deployBlock": 51184074,
+    "deployBlockHash": "0x7d8d49889db54c46d14d338d339e65cd046bb0626b60fc62c5638f8abb248ad9",
+    "deployedAt": "2026-09-11T20:11:35Z",
+    "status": "success",
+    "deployerNonce": 5,
+    "constructorArgs": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
+    ],
+    "store": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "purchaseRefRegistry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "settlementToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "authorizedInPurchaseRefRegistry": true,
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0x58e6ddafa6b0b9d82605b41abef66ef511e7683ebbc1d94a1cc040e11db977a1",
+    "runtimeCodeHash": "0xbd2027274fbfcd44b887a9b3108ade72135b622d7cf8cab8a9beeaf30504d04c",
+    "basescanVerified": true,
+    "verificationUrl": "https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code"
+  },
+  "registryAuthorization": {
+    "registry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "consumer": "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8",
+    "sender": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+    "function": "setConsumerAuthorization(address,bool)",
+    "authorized": true,
+    "txHash": "0xe4bd870886def028ea45a0aed2c319f327dd23324b7c389eec04490b1f632d7f",
+    "block": 51184168,
+    "blockHash": "0xee8dd085efac2888a40ad97b164aa00dd9f8c11f0789ce4cb54709df878ece12",
+    "timestamp": "2026-09-11T20:14:43Z",
+    "status": "success",
+    "deployerNonce": 6
+  },
+  "entitlementRedemption": {
+    "address": "0xDE4F712fa5B5be32766C34885b334F1D8e573882",
+    "deployTxHash": "0x4a53b7d49bf748fb0f2b389cc19e8e8fdfc6888d6145f46d33766f4bd846a3da",
+    "deployBlock": 51184221,
+    "deployBlockHash": "0x11b3c291f3cda3042ac8e48187f0f2763591ae6f9acb7fbe989ebe30a07eb794",
+    "deployedAt": "2026-09-11T20:16:29Z",
+    "status": "success",
+    "deployerNonce": 7,
+    "constructorArgs": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+      ["0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"]
+    ],
+    "store": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "purchaseRefRegistry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "acceptedConsumers": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+      "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"
+    ],
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0xb815f9520dfebf22b8a7734d396416e33e3135370d87fd51bbd65d27e0cce0d5",
+    "runtimeCodeHash": "0xf81b6f8049945b86a7a36649981a7f477e58c2c39028682cfe610931dda35ec4",
+    "basescanVerified": true,
+    "verificationUrl": "https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code"
+  },
+  "scope": {
+    "newPublicPurchaseAndRedemptionDemoRecorded": false,
+    "subgraphPublished": false,
+    "worldRegistrationVerified": false,
+    "note": "Deployment and source verification are not proof of live application integration, a security audit, fulfillment, or human-backed agent authentication. Registry authorization is a checked snapshot and can be revoked by its owner."
+  }
+}
