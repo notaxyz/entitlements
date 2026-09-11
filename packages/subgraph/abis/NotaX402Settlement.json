@@ -1,0 +1,47 @@
+[
+  {
+    "name": "X402ReceiptSettled",
+    "type": "event",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "receiptId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "seller",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "buyer",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "listingId"
+      },
+      {
+        "type": "bytes32",
+        "name": "purchaseRef"
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "bytes32",
+        "name": "metadataHash"
+      },
+      {
+        "type": "bytes32",
+        "name": "agentId"
+      },
+      {
+        "type": "bytes32",
+        "name": "authorizationNonce"
+      }
+    ]
+  }
+]

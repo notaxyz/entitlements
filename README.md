@@ -25,6 +25,7 @@ AgentBook verification are not implemented or verified.**
 - [References, events, and replay protection](#references-events-and-replay-protection)
 - [Deployment](#deployment)
 - [Backend architecture](#backend-architecture)
+- [Public evidence indexing with The Graph](#public-evidence-indexing-with-the-graph)
 - [Trust boundaries and limitations](#trust-boundaries-and-limitations)
 - [Development](#development)
 - [World integration status](#world-integration-status)
@@ -467,6 +468,95 @@ the repository does not implement or claim tested interoperability with x402's
 optional Signed Offers & Receipts extension. See [packages/README.md](./packages/README.md)
 for the paid-resource protocol.
 
+## Public evidence indexing with The Graph
+
+[`packages/subgraph`](./packages/subgraph) contains the schema, event mappings, and
+deterministic tests for a read-only index of Nota purchase and redemption evidence.
+**Status: local build/test phase only. No subgraph has been published, no live
+indexing has been verified, and the backend does not query it yet.** World
+authentication remains a separate, pending integration.
+
+```mermaid
+flowchart LR
+    N["NotaReceiptStore<br/>ReceiptPurchasedV2"] --> S["Settlement evidence"]
+    X["NotaX402Settlement<br/>X402ReceiptSettled"] --> S
+    S --> P["Purchase<br/>chain + registry + purchaseRef"]
+    E["EntitlementRedemption<br/>EntitlementRedeemed"] --> R["Redemption evidence<br/>includes contract address"]
+    R --> P
+    P -.-> Q["Planned: agent history and reconciliation"]
+```
+
+The mappings cover the three event types, not every event or every state variable
+in the contracts. They never submit transactions or change the settlement and
+redemption rules.
+
+| Entity | Identity / meaning |
+| --- | --- |
+| `Purchase` | `chainId:registry:purchaseRef` joins settlement and redemption evidence; receipt IDs are not join keys |
+| `Settlement` | `chainId:transactionHash:logIndex` preserves the emitter, receipt ID, buyer, seller, listing, amount, metadata hash, agent ID, and block provenance |
+| `Redemption` | Independent event evidence including `redemptionContract`; there is deliberately no global `Purchase.redeemed` flag |
+| `Listing` | `chainId:store:listingId` groups observed settlement references, not a complete catalog or current listing state |
+
+Duplicate processing of the same log is idempotent. Distinct settlement logs claiming
+the same reference are retained and marked `CONFLICTED`; later claims do not silently
+replace the first buyer or purchase terms. A redemption without indexed purchase
+history creates an `UNKNOWN` purchase, not a fabricated receipt. `SETTLED` means an
+event was indexed, **not** that the current endpoint authorizes redemption.
+
+The draft manifest pins the existing Base store address. Its `startBlock: 0` is a
+conservative placeholder, **not a verified creation block**; resolve and pin that
+block before publishing. Adapter and redemption mappings are currently uninstantiated
+templates: they compile and are tested, but index nothing until reviewed public
+deployment addresses, start blocks, and store/registry context are configured.
+A hosted subgraph cannot observe contracts deployed only on the local demo fork.
+
+Only public event fields are indexed. The schema contains neither `rawPurchaseRef`
+nor `purchaseRefNonce`, and mappings do not inspect redemption calldata. The public
+EIP-3009 `authorizationNonce` is a different value, not the private preimage nonce.
+A metadata hash proves a commitment, not access to the underlying document or
+proof of fulfillment. An event's `agentId` is not human-verification evidence.
+
+Future queries can support purchase history, spending summaries, and candidate
+unredeemed purchases **for a selected redemption deployment**. Before acting, the
+backend must still check authoritative RPC state, accepted consumers, expected order
+terms, and buyer authentication. Missing data, indexing lag/errors, conflicting
+claims, or uncertain finality mean **unknown**, not permission to redeem. Live
+validation must include indexer health, block freshness, and pagination. Gas and
+query infrastructure can incur costs; this adds no new protocol fee and makes no
+free-query or free-gas claim.
+
+### Build and test the index
+
+Use Node.js **22** (minimum 20.19), then run from the repository root:
+
+```sh
+npm ci
+npm run subgraph:build
+npm run subgraph:test
+```
+
+The build generates types and compiles all three mappings to WASM. Matchstick 0.6.0
+executes deterministic tests of the actual AssemblyScript handlers without Base RPC
+or Graph credentials. Its first run downloads the platform-specific test runner;
+CI uses Ubuntu 22.04 for that binary. ABI parity tests also run with `npm test`.
+Generated code, compiled artifacts, and downloaded runners are ignored by Git.
+
+Tooling caveat: `npm audit` currently reports advisories in Graph CLI transitive
+development dependencies, including a critical `decompress` archive-extraction
+advisory. A successful build does not resolve those findings. Do not use this
+toolchain to process untrusted archives or expose its development services; review
+the dependency findings before deployment tooling is approved. Existing application
+dependency versions are unchanged by this index implementation.
+
+After review, the next phase is publishing an index of the **existing Base store**
+and validating live receipts. Agent reconciliation follows that; a public indexed
+purchase-to-redemption demo additionally requires approved public deployments of
+the new contracts. Publishing and on-chain spending require separate approval.
+
+Implementation references: [Graph manifests](https://thegraph.com/docs/en/subgraphs/developing/creating/subgraph-manifest/),
+[GraphQL schemas](https://thegraph.com/docs/en/subgraphs/developing/creating/ql-schema/),
+and [Matchstick testing](https://thegraph.com/docs/en/subgraphs/tooling/unit-testing-framework/).
+
 ## Trust boundaries and limitations
 
 - **Registry authorization and redemption acceptance are different gates.** The
@@ -499,7 +589,7 @@ upstream dependencies, and non-guarantees.
 
 ### Connected purchase-to-redemption demo
 
-With Node.js 20+, Foundry/Anvil (CI pins 1.8.1), initialized submodules, and `npm ci`:
+With Node.js 22 (minimum 20.19), Foundry/Anvil (CI pins 1.8.1), initialized submodules, and `npm ci`:
 
 ```sh
 BASE_RPC_URL=https://your-base-mainnet-rpc npm run demo:connected

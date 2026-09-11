@@ -30,3 +30,10 @@ node_modules/
 private-data/
 issued-orders.json
 issued-orders.json.*.tmp
+
+# Reproducible Graph codegen/build and Matchstick outputs
+packages/subgraph/generated/
+packages/subgraph/build/
+packages/subgraph/tests/.bin/
+packages/subgraph/tests/.latest.json
+packages/subgraph/tests/.coverage/

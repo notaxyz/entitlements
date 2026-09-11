@@ -1,0 +1,22 @@
+[
+  {
+    "name": "EntitlementRedeemed",
+    "type": "event",
+    "inputs": [
+      {
+        "type": "bytes32",
+        "name": "purchaseRef",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "seller",
+        "indexed": true
+      },
+      {
+        "type": "uint64",
+        "name": "redeemedAt"
+      }
+    ]
+  }
+]

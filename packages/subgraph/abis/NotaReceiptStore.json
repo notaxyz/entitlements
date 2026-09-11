@@ -1,0 +1,43 @@
+[
+  {
+    "name": "ReceiptPurchasedV2",
+    "type": "event",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "receiptId"
+      },
+      {
+        "type": "address",
+        "name": "seller",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "buyer",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "listingId"
+      },
+      {
+        "type": "bytes32",
+        "name": "purchaseRef",
+        "indexed": true
+      },
+      {
+        "type": "uint256",
+        "name": "amount"
+      },
+      {
+        "type": "bytes32",
+        "name": "metadataHash"
+      },
+      {
+        "type": "bytes32",
+        "name": "agentId"
+      }
+    ]
+  }
+]

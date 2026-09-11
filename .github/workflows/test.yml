@@ -52,7 +52,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -70,3 +70,29 @@ jobs:
       # frozen contracts and always runs; missing tools or artifacts are failures, not skips.
       - name: Run tests
         run: npm test
+
+  subgraph:
+    name: Graph mappings
+    # Matchstick 0.6.0 supplies a Linux 22 binary, not an Ubuntu 24 binary.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate types and compile all mappings
+        run: npm run subgraph:build
+
+      # No RPC, credentials, or conditional skip: mapping failures fail CI.
+      - name: Run deterministic mapping tests
+        run: npm run subgraph:test

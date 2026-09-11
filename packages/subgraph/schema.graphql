@@ -1,0 +1,84 @@
+# This is indexed public evidence, never an authorization decision.
+enum PurchaseStatus {
+  UNKNOWN
+  SETTLED
+  CONFLICTED
+}
+
+enum SettlementKind {
+  STORE
+  X402_ADAPTER
+}
+
+type Purchase @entity(immutable: false) {
+  # chainId:registry:purchaseRef — not receiptId, which is module-local.
+  id: ID!
+  chainId: BigInt!
+  registry: Bytes!
+  purchaseRef: Bytes!
+  status: PurchaseStatus!
+  settlementCount: BigInt!
+  # First observed settlement. Null when only a redemption has been indexed.
+  firstSettlement: Settlement
+  buyer: Bytes
+  seller: Bytes
+  listing: Listing
+  amount: BigInt
+  metadataHash: Bytes
+  settlements: [Settlement!]! @derivedFrom(field: "purchase")
+  # No global redeemed flag: consumers must select a redemption contract.
+  redemptions: [Redemption!]! @derivedFrom(field: "purchase")
+}
+
+# Observed listing references, NOT a complete listing catalog or current listing state.
+type Listing @entity(immutable: true) {
+  id: ID!
+  chainId: BigInt!
+  store: Bytes!
+  listingId: BigInt!
+  settlements: [Settlement!]! @derivedFrom(field: "listing")
+}
+
+type Settlement @entity(immutable: true) {
+  # chainId:transactionHash:logIndex — retains distinct conflicting claims.
+  id: ID!
+  purchase: Purchase!
+  chainId: BigInt!
+  registry: Bytes!
+  store: Bytes!
+  kind: SettlementKind!
+  emitter: Bytes!
+  receiptId: BigInt!
+  listing: Listing!
+  listingId: BigInt!
+  purchaseRef: Bytes!
+  buyer: Bytes!
+  seller: Bytes!
+  amount: BigInt!
+  metadataHash: Bytes!
+  agentId: Bytes!
+  authorizationNonce: Bytes
+  transactionHash: Bytes!
+  logIndex: BigInt!
+  blockNumber: BigInt!
+  blockHash: Bytes!
+  blockTimestamp: BigInt!
+}
+
+# Every observed redemption event, retaining its independent deployment boundary.
+type Redemption @entity(immutable: true) {
+  id: ID!
+  purchase: Purchase!
+  chainId: BigInt!
+  registry: Bytes!
+  store: Bytes!
+  redemptionContract: Bytes!
+  purchaseRef: Bytes!
+  seller: Bytes!
+  redeemedAt: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+  blockNumber: BigInt!
+  blockHash: Bytes!
+  blockTimestamp: BigInt!
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@nota/subgraph",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "codegen": "graph codegen subgraph.yaml",
+    "build": "graph build subgraph.yaml",
+    "test": "graph test --version 0.6.0"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.98.1",
+    "@graphprotocol/graph-ts": "0.35.1",
+    "matchstick-as": "0.6.0"
+  }
+}

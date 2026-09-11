@@ -1,0 +1,75 @@
+# Phase 1 draft: compilation/tests only. Not deployed.
+# startBlock: 0 is conservative, NOT a verified deployment block.
+# Resolve and pin the creation block before the phase 2 live deployment.
+specVersion: 1.0.0
+description: Nota public purchase evidence; redemption is deployment-scoped, not authorization.
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum/contract
+    name: NotaReceiptStore
+    network: base
+    source:
+      address: "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
+      abi: NotaReceiptStore
+      startBlock: 0
+    context:
+      chainId:
+        type: BigInt
+        data: "8453"
+      registry:
+        type: Bytes
+        data: "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991"
+      store:
+        type: Bytes
+        data: "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities: [Purchase, Listing, Settlement]
+      abis:
+        - name: NotaReceiptStore
+          file: ./abis/NotaReceiptStore.json
+      eventHandlers:
+        - event: ReceiptPurchasedV2(uint256,indexed address,indexed address,uint256,indexed bytes32,uint256,bytes32,bytes32)
+          handler: handleReceiptPurchasedV2
+      file: ./src/store.ts
+# These templates compile but are NOT instantiated by any mapping. No wildcard
+# address scans, invented deployment addresses, or automatic trust of new emitters.
+# Activating a new deployment requires reviewed address/start-block/context configuration.
+templates:
+  - kind: ethereum/contract
+    name: NotaX402Settlement
+    network: base
+    source:
+      abi: NotaX402Settlement
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities: [Purchase, Listing, Settlement]
+      abis:
+        - name: NotaX402Settlement
+          file: ./abis/NotaX402Settlement.json
+      eventHandlers:
+        - event: X402ReceiptSettled(indexed uint256,indexed address,indexed address,uint256,bytes32,uint256,bytes32,bytes32,bytes32)
+          handler: handleX402ReceiptSettled
+      file: ./src/adapter.ts
+  - kind: ethereum/contract
+    name: EntitlementRedemption
+    network: base
+    source:
+      abi: EntitlementRedemption
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities: [Purchase, Redemption]
+      abis:
+        - name: EntitlementRedemption
+          file: ./abis/EntitlementRedemption.json
+      eventHandlers:
+        - event: EntitlementRedeemed(indexed bytes32,indexed address,uint64)
+          handler: handleEntitlementRedeemed
+      file: ./src/redemption.ts
