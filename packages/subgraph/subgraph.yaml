@@ -1,6 +1,5 @@
-# Phase 1 draft: compilation/tests only. Not deployed.
-# startBlock: 0 is conservative, NOT a verified deployment block.
-# Resolve and pin the creation block before the phase 2 live deployment.
+# Not deployed. Existing store creation verified through Base RPC; see README.
+# Creation tx: 0x78301d0cffc614a1ad591275a96fbdd413fddb73568d57fe6bda3a37e4055266
 specVersion: 1.0.0
 description: Nota public purchase evidence; redemption is deployment-scoped, not authorization.
 schema:
@@ -12,7 +11,7 @@ dataSources:
     source:
       address: "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
       abi: NotaReceiptStore
-      startBlock: 0
+      startBlock: 50536305
     context:
       chainId:
         type: BigInt
