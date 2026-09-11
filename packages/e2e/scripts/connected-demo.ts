@@ -10,7 +10,7 @@ async function main() {
     "AUTHENTICATION: mock-wallet signatures, humanVerified=false. No World ID or AgentBook verification.",
   );
   console.info(
-    "BUNDLE: freshly issued by the merchant and released through authenticated paid access; not buyer-generated.",
+    "BUNDLE: buyer-generated before checkout, shared privately with merchant/configured RPC; excluded from payment messages and logs.",
   );
   const fixture = await startFixture();
   try {

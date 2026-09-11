@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { payAndFetch, refetchPaidResource } from "@nota/client";
+import { payAndFetch, refetchPaidResource, type RedemptionBundle } from "@nota/client";
 import {
   baseDeployment,
   buildPaymentPayload,
@@ -30,7 +30,7 @@ export interface DemoStep {
   transactionsSent?: number;
 }
 
-/** One real HTTP purchase, using the returned bundle for every redemption attempt. */
+/** One real HTTP purchase, using the buyer's original bundle for every redemption attempt. */
 export async function runConnectedDemo(
   f: Fixture,
   onStep: (step: DemoStep) => void = () => {},
@@ -45,6 +45,8 @@ export async function runConnectedDemo(
   let settlementRequests = 0;
   let accessChallenges = 0;
   let publicPaymentData = "";
+  let buyerBundle: RedemptionBundle | undefined;
+  let bundleCheckoutRequests = 0;
   const buyerEthBefore = await f.publicClient.getBalance({ address: f.buyer });
   const buyerNonceBefore = await f.publicClient.getTransactionCount({
     address: f.buyer,
@@ -54,6 +56,12 @@ export async function runConnectedDemo(
 
   const tracedFetch: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
+    if (url.href === f.resourceUrl && init?.method === "POST") {
+      assert(buyerBundle, "Buyer must create its bundle before checkout");
+      assert.equal(init.redirect, "error", "Private checkout must not follow redirects");
+      assert.deepEqual(JSON.parse(init.body as string), buyerBundle);
+      bundleCheckoutRequests++;
+    }
     const response = await fetch(input, init);
     if (response.status === 402 && url.href === f.resourceUrl) {
       quoteResponses++;
@@ -109,12 +117,19 @@ export async function runConnectedDemo(
     trusted: baseDeployment([f.adapter]),
     logger: { info: () => {}, warn: () => {} },
     fetchImpl: tracedFetch,
+    onBundleCreated: async (bundle: Readonly<RedemptionBundle>) => {
+      buyerBundle = { ...bundle };
+    },
   };
   const paid = await payAndFetch<{ report: string }>(f.resourceUrl, agent);
   assert(
     paid.entitlement,
-    "Authenticated paid response must supply the redemption bundle",
+    "Client must retain the buyer-generated redemption bundle",
   );
+  assert(buyerBundle);
+  assert.equal(bundleCheckoutRequests, 1);
+  assert.equal(paid.entitlement.rawPurchaseRef, buyerBundle.rawPurchaseRef);
+  assert.equal(paid.entitlement.purchaseRefNonce, buyerBundle.purchaseRefNonce);
   assert.equal(paid.content.report, "base-usdc-flows-2026-09");
   assert.equal(paid.receipt.purchaseRef, purchaseRef);
   assert.equal(quoteResponses, 1, "Demo must use one issued quote");

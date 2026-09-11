@@ -67,6 +67,9 @@ async function serve(quoteStore: QuoteStore) {
     throw new Error("Missing test port");
   const url = `http://127.0.0.1:${address.port}`;
   return {
+    checkout: (body: string, payer = buyer) => fetch(`${url}/reports/base-usdc-flows-2026-09`, {
+      method: "POST", headers: { "x-payer": payer, "content-type": "application/json" }, body,
+    }),
     issue: () =>
       fetch(`${url}/reports/base-usdc-flows-2026-09`, {
         headers: { "x-payer": buyer },
@@ -96,6 +99,62 @@ afterEach(async () => {
 });
 
 describe("resource-server issued-order persistence", () => {
+  it("persists the supplied buyer bundle without exposing it in the signed 402", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "nota-buyer-checkout-"));
+    directories.push(directory);
+    const filename = path.join(directory, "issued-orders.json");
+    const server = await serve(fileQuoteStore(filename));
+    const bundle = { rawPurchaseRef: "buyer-created-order", purchaseRefNonce: keccak256(toHex("buyer-created-nonce")) };
+    const response = await server.checkout(JSON.stringify(bundle));
+    expect(response.status).toBe(402);
+    const text = await response.text();
+    expect(text).not.toContain(bundle.rawPurchaseRef);
+    expect(text).not.toContain(bundle.purchaseRefNonce);
+    const quote = JSON.parse(text).extensions[NOTA_EXTENSION_KIND].quote;
+    const record = await fileQuoteStore(filename).get(quote.purchaseRef);
+    expect(record).toMatchObject({ ...bundle, bundleSource: "buyer" });
+    expect(quote.buyer).toBe(buyer);
+    await server.stop();
+    const restarted = await serve(fileQuoteStore(filename));
+    expect((await restarted.challenge(quote.purchaseRef)).status).toBe(200);
+  });
+
+  it("rejects invalid or malformed private bodies without fallback, persistence, or secret logging", async () => {
+    const store = memoryQuoteStore();
+    const put = vi.spyOn(store, "put");
+    const logger = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await serve(store);
+    const nonce = keccak256(toHex("must-not-leak"));
+    const cases = [JSON.stringify({ rawPurchaseRef: "", purchaseRefNonce: nonce }),
+      JSON.stringify({ rawPurchaseRef: "private-ref", purchaseRefNonce: "0x00" }),
+      JSON.stringify({ rawPurchaseRef: "private-ref", purchaseRefNonce: `0x${"00".repeat(32)}` }),
+      JSON.stringify({ rawPurchaseRef: "private-ref", purchaseRefNonce: nonce, extra: true }),
+      `{"rawPurchaseRef":"private-ref","purchaseRefNonce":"${nonce}" broken}`];
+    for (const body of cases) {
+      const response = await server.checkout(body);
+      expect(response.status).toBe(400);
+      const output = await response.text();
+      expect(output).not.toContain(nonce);
+      expect(output).not.toContain("private-ref");
+    }
+    expect((await server.checkout(JSON.stringify({ rawPurchaseRef: "private-ref", purchaseRefNonce: nonce }), "invalid")).status).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(nonce);
+    expect(JSON.stringify(logger.mock.calls)).not.toContain("private-ref");
+  });
+
+  it("cannot rebind an existing buyer's order by submitting its bundle with another payer", async () => {
+    const store = memoryQuoteStore();
+    const server = await serve(store);
+    const body = JSON.stringify({ rawPurchaseRef: "buyer-original", purchaseRefNonce: keccak256(toHex("original-nonce")) });
+    const first = await server.checkout(body);
+    expect(first.status).toBe(402);
+    const quote = ((await first.json()) as PaymentRequiredResponse).extensions[NOTA_EXTENSION_KIND]!.quote;
+    const attack = await server.checkout(body, "0x9999999999999999999999999999999999999999");
+    expect(attack.status).toBe(500);
+    expect((await store.get(quote.purchaseRef))?.quote.buyer).toBe(buyer);
+  });
+
   it("persists every concurrent HTTP quote and restores access challenges after server restart", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "nota-resource-persistence-"),

@@ -36,6 +36,8 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { randomBytes } from "node:crypto";
+import { assertPrivateCheckoutUrl, createRedemptionBundle, type RedemptionBundle } from "./bundle.js";
+export { createRedemptionBundle, type RedemptionBundle } from "./bundle.js";
 
 export interface AgentLogger {
   info(message: string, detail?: unknown): void;
@@ -76,6 +78,9 @@ export interface AgentConfig {
   authorizationTtlSeconds?: bigint;
   logger?: AgentLogger;
   fetchImpl?: typeof fetch;
+  /// Called before checkout/payment; await durable private storage here for crash recovery.
+  /// Without this callback the buyer's copy is in memory until payAndFetch returns.
+  onBundleCreated?: (bundle: Readonly<RedemptionBundle>) => Promise<void>;
 }
 
 export interface PaidResource<T = unknown> {
@@ -83,7 +88,7 @@ export interface PaidResource<T = unknown> {
   content: T;
   receipt: SettlementResponse;
   metadata: CheckoutMetadata;
-  /// The redemption bundle, if the server chose to release it with the paid response.
+  /// payAndFetch returns the locally generated bundle; refetch may recover a merchant-held copy.
   entitlement?: { listingId: string; rawPurchaseRef: string; purchaseRefNonce: Hex };
 }
 
@@ -98,9 +103,29 @@ export async function payAndFetch<T = unknown>(
   const publicClient = createPublicClient({ chain, transport: http(config.rpcUrl) });
   const walletClient = createWalletClient({ account: buyer, chain, transport: http(config.rpcUrl) });
 
+  assertPrivateCheckoutUrl(resourceUrl);
+  const bundle = createRedemptionBundle();
+  if (config.onBundleCreated) {
+    try {
+      await config.onBundleCreated(Object.freeze({ ...bundle }));
+    } catch {
+      throw new Error("Could not retain buyer redemption bundle; checkout not started");
+    }
+  }
   logger.info(`requesting ${resourceUrl} as ${buyer.address}`);
 
-  const unpaid = await doFetch(resourceUrl, { headers: { "x-payer": buyer.address } });
+  let unpaid: Response;
+  try {
+    unpaid = await doFetch(resourceUrl, {
+      method: "POST",
+      redirect: "error",
+      headers: { "x-payer": buyer.address, "content-type": "application/json" },
+      body: JSON.stringify(bundle),
+    });
+  } catch {
+    // Transport errors can include the request body. Never propagate them to a logger.
+    throw new Error("Buyer bundle checkout request failed");
+  }
 
   if (unpaid.status !== 402) {
     throw new Error(`expected 402 from ${resourceUrl}, got ${unpaid.status}`);
@@ -137,6 +162,23 @@ export async function payAndFetch<T = unknown>(
   if (wiringProblems.length > 0) {
     logger.warn("REFUSING TO PAY: the adapter is not wired to the trusted deployment", wiringProblems);
     throw new PaymentRefused("untrusted adapter", wiringProblems);
+  }
+
+  // Independently verify the seller's quote commits to the buyer's own bundle before
+  // signing any payment. The configured RPC receives the preimage in this eth_call.
+  let reconstructed: Hex;
+  try {
+    reconstructed = await publicClient.readContract({
+      address: config.trusted.store,
+      abi: notaReceiptStoreAbi,
+      functionName: "hashPurchaseRef",
+      args: [extension.seller, quote.listingId, bundle.rawPurchaseRef, bundle.purchaseRefNonce],
+    });
+  } catch {
+    throw new PaymentRefused("bundle verification unavailable", ["canonical hash lookup failed"]);
+  }
+  if (reconstructed.toLowerCase() !== quote.purchaseRef.toLowerCase()) {
+    throw new PaymentRefused("buyer bundle commitment rejected", ["quote references a different bundle"]);
   }
 
   const document = await resolveMetadata(extension, doFetch);
@@ -186,7 +228,7 @@ export async function payAndFetch<T = unknown>(
   );
 
   // Public payment-path entropy. Fresh per attempt so a cancelled authorization can be replaced,
-  // and unrelated to the redemption purchaseRefNonce, which this agent has never seen.
+  // and unrelated to the buyer's private redemption purchaseRefNonce.
   const paymentSalt = toHex(randomBytes(32));
 
   const digest = quoteDigest(quote, {
@@ -247,13 +289,17 @@ export async function payAndFetch<T = unknown>(
   });
 
   if (!paid.ok) {
-    const detail = await paid.text();
-    throw new Error(`resource still withheld after settlement (${paid.status}): ${detail}`);
+    throw new Error(`resource still withheld after settlement (${paid.status})`);
   }
 
   const payload = (await paid.json()) as PaidResource<T>;
 
-  return { ...payload, receipt: settlement, metadata: document };
+  return {
+    ...payload,
+    receipt: settlement,
+    metadata: document,
+    entitlement: { listingId: quote.listingId.toString(), ...bundle },
+  };
 }
 
 /**

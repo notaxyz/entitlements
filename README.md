@@ -435,10 +435,28 @@ and a plan for already-redeemed references.
 | [`packages/facilitator`](./packages/facilitator/src) | Submits allowed adapter settlements and pays gas | Relayer key is not the buyer's key or redemption authority |
 | [`resource-server/src/redemption`](./packages/resource-server/src/redemption) | Separate redemption HTTP service, authorizer seam, chain verification, seller writer | Enforces authenticated-wallet == receipt-buyer before seller submission |
 
-The existing paid-content server generates its bundle and releases it only after
-authenticated paid access. The standalone redemption demo instead generates a fresh bundle
-on the buyer side before constructing a buyer-bound quote. These are distinct
-bundle-creation flows; the demo is not a production checkout redesign.
+The client and connected demo generate a fresh preimage bundle **on the buyer side
+before requesting a quote**. They POST it to the report URL with `X-PAYER`; the
+merchant uses the deployed store's canonical hash helper, persists the order, and
+returns a buyer-bound HTTP 402 quote without the bundle. Before authorizing payment,
+the client independently calls the trusted store's helper and rejects a quote that
+does not commit to its original bundle. Legacy GET checkout remains available with
+merchant-generated bundles; the client does not silently fall back to it.
+
+Buyer-generated does **not** mean buyer-exclusive: the merchant receives and stores
+the bundle, and the configured RPC receives it when computing the canonical hash.
+Use trusted endpoints, HTTPS, private order storage, and disable request-body logging
+at reverse proxies/APM as well as in the application. The client refuses non-HTTPS
+checkout URLs except loopback development and refuses checkout redirects. Public
+payment messages still carry only the commitment; redemption later publishes the
+bundle in transaction calldata.
+
+`AgentConfig.onBundleCreated` is an optional asynchronous hook for privately retaining
+the buyer's copy before checkout. A failed hook aborts before any request or payment.
+Without it, that copy is in memory until `payAndFetch` returns it; the connected demo
+uses in-memory retention, not a durable buyer wallet vault. Authenticated paid access
+can still recover the merchant-held copy after a merchant restart. Buyer binding is
+to the wallet signing payment; World registration remains a separate pending check.
 
 ### Persistent issued orders
 
@@ -645,9 +663,9 @@ with fork USDC and no ETH. No wallet keys or pre-existing receipt bundle are nee
 
 It exercises one purchase end to end:
 
-1. Buyer A receives HTTP 402 with a buyer-bound quote and verifies the purchase terms.
+1. Buyer A generates its bundle, POSTs it privately, receives HTTP 402 with a buyer-bound quote, and verifies its bundle commitment and purchase terms.
 2. A signs the EIP-3009 authorization; the facilitator submits settlement and pays gas.
-3. A signs an access challenge and receives the resource and preimage bundle.
+3. A signs an access challenge and receives the resource; the client retains A's original bundle.
 4. The resource server restarts; A recovers the same purchase without paying again.
 5. B presents A's exact bundle before redemption: `403 BUYER_MISMATCH`, step 6, no transaction.
 6. A uses that bundle: `201`, with the actual `EntitlementRedeemed` event verified.
@@ -660,8 +678,8 @@ settlement request, demo transcript, and redemption audit logs. The transcript p
 only selected public fields; errors do not dump response bodies or RPC calldata.
 
 **Limits:** requester authentication is still `mock-wallet`, with `humanVerified: false`.
-The bundle is freshly **merchant-generated**, then delivered to the authenticated buyer;
-this is not yet the buyer-generated bundle flow required for the final World demo.
+The bundle is freshly **buyer-generated**, shared with the merchant through checkout,
+and kept in memory by the demo buyer. Real World authentication remains unfinished.
 All printed transaction hashes belong to the local fork, not a public deployment.
 Services, fork state, and the temporary issued-order file are disposed after the run.
 This command requires a working Base RPC and fails rather than silently switching to mocks.
@@ -774,9 +792,9 @@ agents remain pending. The mock's `humanId` is synthetic, and responses identify
 disagreement about registry/network defaults, and the draft questions for World.
 It is not evidence that a message was sent or that registration succeeded.
 
-The final World demonstration must use a new buyer-generated preimage bundle, bind
-the quote's `buyer` to the authenticated AgentKit wallet, and exercise real registered
-agents. Receipt #1 and the local mock demo establish different things and cannot
+The connected demo now uses a new buyer-generated preimage bundle and binds the quote
+to buyer A's signing wallet. The final World demonstration must additionally authenticate
+that wallet through AgentKit and exercise real registered agents. Receipt #1 and the local mock demo establish different things and cannot
 substitute for that verification. No automatic World-to-mock downgrade is implemented.
 
 ## License

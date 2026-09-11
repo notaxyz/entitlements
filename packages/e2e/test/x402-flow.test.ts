@@ -66,11 +66,14 @@ describeFork("x402 → Nota settlement, end to end on a Base fork", () => {
     expect(await fixture.publicClient.getBalance({ address: fixture.buyer })).toBe(0n);
   });
 
-  it("hands the redemption credential over with the paid resource, and only then", async () => {
-    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig());
+  it("preserves the buyer-generated bundle and verifies its canonical commitment", async () => {
+    let original: { rawPurchaseRef: string; purchaseRefNonce: string } | undefined;
+    const paid = await payAndFetch<{ report: string }>(fixture.resourceUrl, agentConfig({
+      onBundleCreated: async bundle => { original = { ...bundle }; },
+    }));
 
-    // The buyer now holds the bundle. This is the one channel that carries it: after settlement,
-    // in the paid response, to the payer that funded it.
+    // The buyer held the original before checkout; paid access can recover a merchant-held copy.
+    expect(paid.entitlement).toMatchObject(original!);
     expect(paid.entitlement).toBeDefined();
     expect(paid.entitlement!.purchaseRefNonce).toMatch(/^0x[0-9a-f]{64}$/);
     expect(paid.entitlement!.rawPurchaseRef).toMatch(/^nota_x402_[0-9a-f]+$/);

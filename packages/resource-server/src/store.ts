@@ -19,6 +19,8 @@ export interface IssuedQuoteRecord {
   rawPurchaseRef: string;
   purchaseRefNonce: Hex;
   catalogId: string;
+  /// Missing on historical records, which used merchant-generated bundles.
+  bundleSource?: "buyer" | "merchant";
 }
 
 export interface QuoteStore {
@@ -34,10 +36,13 @@ export function memoryQuoteStore(): QuoteStore {
       return structuredClone(records.get(purchaseRef.toLowerCase() as Hex));
     },
     async put(record) {
-      records.set(
-        record.purchaseRef.toLowerCase() as Hex,
-        structuredClone(record),
-      );
+      const key = record.purchaseRef.toLowerCase() as Hex;
+      const snapshot = structuredClone(record);
+      const existing = records.get(key);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(snapshot)) {
+        throw new Error("Cannot replace an issued order");
+      }
+      records.set(key, snapshot);
     },
   };
 }

@@ -21,12 +21,13 @@ import {
   type PaymentRequiredResponse,
   type SignedReceiptQuote,
 } from "@nota/x402-nota";
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import {
   createPublicClient,
   createWalletClient,
   http,
   isAddressEqual,
+  isAddress,
   toHex,
   type Address,
   type Hex,
@@ -115,7 +116,9 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     response.json(challenge);
   }));
 
-  app.get("/reports/:id", safe(async (request: Request, response: Response) => {
+  app.route("/reports/:id").get(safe(serveReport)).post(safe(serveReport));
+
+  async function serveReport(request: Request, response: Response): Promise<void> {
     const entry = CATALOG[request.params.id ?? ""];
 
     if (!entry) {
@@ -127,11 +130,29 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     const paymentHeader = request.header("x-payment");
 
     if (paymentHeader) {
+      if (request.method !== "GET") {
+        response.status(400).json({ error: "paid access requires GET" });
+        return;
+      }
       await serveIfPaid(paymentHeader, request.header("x-payment-auth"), resource, response);
       return;
     }
 
     const payer = request.header("x-payer") as Address | undefined;
+
+    let buyerBundle: { rawPurchaseRef: string; purchaseRefNonce: Hex } | undefined;
+    if (request.method === "POST") {
+      const body = request.body;
+      if (!payer || !isAddress(payer) || /^0x0{40}$/i.test(payer) ||
+          !body || Object.keys(body).length !== 2 ||
+          typeof body.rawPurchaseRef !== "string" || body.rawPurchaseRef.length < 1 ||
+          body.rawPurchaseRef.length > 256 || typeof body.purchaseRefNonce !== "string" ||
+          !/^0x[0-9a-fA-F]{64}$/.test(body.purchaseRefNonce) || /^0x0{64}$/i.test(body.purchaseRefNonce)) {
+        response.status(400).json({ error: "invalid buyer bundle checkout request" });
+        return;
+      }
+      buyerBundle = { rawPurchaseRef: body.rawPurchaseRef, purchaseRefNonce: body.purchaseRefNonce };
+    }
 
     if (!payer) {
       // A Nota quote binds a specific buyer, and the adapter rejects unbound quotes outright, so
@@ -146,13 +167,13 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     }
 
     try {
-      response.status(402).json(await buildPaymentRequired(payer, resource, entry.id));
+      response.status(402).json(await buildPaymentRequired(payer, resource, entry.id, buyerBundle));
     } catch {
       response.status(500).json({
         error: "could not issue a quote",
       });
     }
-  }));
+  }
 
   function acceptsBlock(resource: string, description: string, amount: bigint) {
     return {
@@ -172,14 +193,15 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     payer: Address,
     resource: string,
     catalogId: string,
+    buyerBundle?: { rawPurchaseRef: string; purchaseRefNonce: Hex },
   ): Promise<PaymentRequiredResponse> {
     const entry = CATALOG[catalogId]!;
 
-    // The entitlement bundle stays on this server until authenticated paid delivery. The raw
+    // POST checkout supplies buyer-generated entropy; legacy GET generates it here. The raw
     // reference is not necessarily secret; purchaseRefNonce makes purchaseRef unguessable.
     // Payment publishes only the hash. Later redemption publishes the bundle in calldata.
-    const rawPurchaseRef = `nota_x402_${randomBytes(12).toString("hex")}`;
-    const purchaseRefNonce = toHex(randomBytes(32));
+    const rawPurchaseRef = buyerBundle?.rawPurchaseRef ?? `nota_x402_${randomBytes(12).toString("hex")}`;
+    const purchaseRefNonce = buyerBundle?.purchaseRefNonce ?? toHex(randomBytes(32));
 
     const purchaseRef = await publicClient.readContract({
       address: config.store,
@@ -240,6 +262,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       rawPurchaseRef,
       purchaseRefNonce,
       catalogId,
+      bundleSource: buyerBundle ? "buyer" : "merchant",
     });
 
     const extension: NotaExtension = {
@@ -426,8 +449,8 @@ export function createResourceServer(config: ResourceServerConfig): Express {
         buyer: settled.buyer!,
         amount: settled.amount!.toString(),
       },
-      // Handed over only here: after settlement, over the paid response, to the payer who funded
-      // it. This is what makes the entitlement theirs to redeem. It is never in a 402 response,
+      // Merchant-held copy returned only after settlement to the authenticated payer.
+      // With POST checkout the buyer already owns the original. It is never in a 402 response,
       // never in a settlement request, and never in settlement calldata. Redemption later
       // publishes the bundle in its own calldata.
       entitlement: {
@@ -438,6 +461,11 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     });
   }
 
+  // JSON parser errors can include request-body fragments. Never use Express's default
+  // error response/logger for a route accepting preimage bundles.
+  app.use((_error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+    response.status(400).json({ error: "invalid request body" });
+  });
   return app;
 }
 
