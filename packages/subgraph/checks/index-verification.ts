@@ -1,4 +1,6 @@
 // Read-only deployment checks, deliberately separate from backend authorization.
+import { deployed } from "./deployments.js";
+
 export const baseline = {
   chainId: 8453,
   store: "0xf6062f3f52d3e19cb9cc3e027491a5c11d101f88",
@@ -53,7 +55,8 @@ export const healthQuery = `query IndexHealth {
 
 // Freeze every page to the same RPC-confirmed finalized block hash, use an ID
 // cursor instead of skip, and retain _meta on every response. No partial success.
-export async function scanSettlements(
+async function scanEvidence(
+  entity: "settlements" | "redemptions",
   query: Query,
   deployment: string,
   snapshot: Snapshot,
@@ -72,12 +75,17 @@ export async function scanSettlements(
   let cursor = "";
   for (let page = 0; page < maxPages; page++) {
     const data = await query(
-      `query Settlements($block: Block_height!, $cursor: String!, $first: Int!) {
+      `query Evidence($block: Block_height!, $cursor: String!, $first: Int!) {
       _meta(block: $block) { deployment hasIndexingErrors block { number hash } }
-      settlements(block: $block, first: $first, orderBy: id, orderDirection: asc,
+      ${entity}(block: $block, first: $first, orderBy: id, orderDirection: asc,
         where: { id_gt: $cursor }) {
-        id chainId registry store kind emitter receiptId listingId purchaseRef buyer seller
-        amount metadataHash agentId transactionHash logIndex blockNumber blockHash blockTimestamp
+        id chainId registry store purchaseRef seller
+        transactionHash logIndex blockNumber blockHash blockTimestamp
+        ${
+          entity === "settlements"
+            ? "kind emitter receiptId listingId buyer amount metadataHash agentId authorizationNonce"
+            : "redemptionContract redeemedAt"
+        }
       }
     }`,
       { block: { hash: snapshot.hash }, cursor, first: pageSize },
@@ -85,26 +93,73 @@ export async function scanSettlements(
     const meta = checkedMeta(data, deployment);
     if (meta.hash !== snapshot.hash || meta.number !== snapshot.number)
       throw new Error("INDEX_SNAPSHOT_CHANGED");
-    if (!Array.isArray(data.settlements) || data.settlements.length > pageSize)
+    const pageRows = data[entity];
+    if (!Array.isArray(pageRows) || pageRows.length > pageSize)
       throw new Error("INVALID_PAGE");
-    for (const row of data.settlements) {
+    for (const row of pageRows) {
+      const startBlock =
+        entity === "redemptions"
+          ? row?.redemptionContract === deployed.redemption
+            ? deployed.redemptionBlock
+            : undefined
+          : row?.kind === "STORE" && row?.emitter === baseline.store
+            ? baseline.creationBlock
+            : row?.kind === "X402_ADAPTER" && row?.emitter === deployed.adapter
+              ? deployed.adapterBlock
+              : undefined;
       if (
         typeof row?.id !== "string" ||
         row.id <= cursor ||
         row.chainId !== String(baseline.chainId) ||
         row.registry !== baseline.registry ||
         row.store !== baseline.store ||
-        row.emitter !== baseline.store ||
-        row.kind !== "STORE"
+        startBlock === undefined ||
+        !/^(0|[1-9][0-9]*)$/.test(row.blockNumber ?? "") ||
+        BigInt(row.blockNumber) < BigInt(startBlock) ||
+        BigInt(row.blockNumber) > BigInt(snapshot.number)
       ) {
         throw new Error("INVALID_CURSOR_OR_SOURCE");
       }
       rows.push(row);
       cursor = row.id;
     }
-    if (data.settlements.length < pageSize) return rows;
+    if (pageRows.length < pageSize) return rows;
   }
   throw new Error("PAGINATION_LIMIT_REACHED");
+}
+
+export function scanSettlements(
+  query: Query,
+  deployment: string,
+  snapshot: Snapshot,
+  pageSize = 100,
+  maxPages = 100,
+): Promise<Record<string, string>[]> {
+  return scanEvidence(
+    "settlements",
+    query,
+    deployment,
+    snapshot,
+    pageSize,
+    maxPages,
+  );
+}
+
+export function scanRedemptions(
+  query: Query,
+  deployment: string,
+  snapshot: Snapshot,
+  pageSize = 100,
+  maxPages = 100,
+): Promise<Record<string, string>[]> {
+  return scanEvidence(
+    "redemptions",
+    query,
+    deployment,
+    snapshot,
+    pageSize,
+    maxPages,
+  );
 }
 
 export function compareReceipt(

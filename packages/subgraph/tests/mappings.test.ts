@@ -16,8 +16,8 @@ import {
   test,
 } from "matchstick-as/assembly/index";
 import { ReceiptPurchasedV2 } from "../generated/NotaReceiptStore/NotaReceiptStore";
-import { X402ReceiptSettled } from "../generated/templates/NotaX402Settlement/NotaX402Settlement";
-import { EntitlementRedeemed } from "../generated/templates/EntitlementRedemption/EntitlementRedemption";
+import { X402ReceiptSettled } from "../generated/NotaX402Settlement/NotaX402Settlement";
+import { EntitlementRedeemed } from "../generated/EntitlementRedemption/EntitlementRedemption";
 import { Purchase, Redemption, Settlement } from "../generated/schema";
 import { handleReceiptPurchasedV2 } from "../src/store";
 import { handleX402ReceiptSettled } from "../src/adapter";

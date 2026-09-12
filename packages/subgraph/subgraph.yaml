@@ -1,4 +1,4 @@
-# Not deployed. Existing store creation verified through Base RPC; see README.
+# Prepared for Base; subgraph not published. New deployments: ../../deployments/base.json.
 # Creation tx: 0x78301d0cffc614a1ad591275a96fbdd413fddb73568d57fe6bda3a37e4055266
 specVersion: 1.0.0
 description: Nota public purchase evidence; redemption is deployment-scoped, not authorization.
@@ -34,15 +34,23 @@ dataSources:
         - event: ReceiptPurchasedV2(uint256,indexed address,indexed address,uint256,indexed bytes32,uint256,bytes32,bytes32)
           handler: handleReceiptPurchasedV2
       file: ./src/store.ts
-# These templates compile but are NOT instantiated by any mapping. No wildcard
-# address scans, invented deployment addresses, or automatic trust of new emitters.
-# Activating a new deployment requires reviewed address/start-block/context configuration.
-templates:
   - kind: ethereum/contract
     name: NotaX402Settlement
     network: base
     source:
+      address: "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"
       abi: NotaX402Settlement
+      startBlock: 51184074
+    context:
+      chainId:
+        type: BigInt
+        data: "8453"
+      registry:
+        type: Bytes
+        data: "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991"
+      store:
+        type: Bytes
+        data: "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -59,7 +67,19 @@ templates:
     name: EntitlementRedemption
     network: base
     source:
+      address: "0xDE4F712fa5B5be32766C34885b334F1D8e573882"
       abi: EntitlementRedemption
+      startBlock: 51184221
+    context:
+      chainId:
+        type: BigInt
+        data: "8453"
+      registry:
+        type: Bytes
+        data: "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991"
+      store:
+        type: Bytes
+        data: "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

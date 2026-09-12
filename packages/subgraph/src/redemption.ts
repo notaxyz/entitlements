@@ -1,5 +1,5 @@
 import { dataSource } from "@graphprotocol/graph-ts";
-import { EntitlementRedeemed } from "../generated/templates/EntitlementRedemption/EntitlementRedemption";
+import { EntitlementRedeemed } from "../generated/EntitlementRedemption/EntitlementRedemption";
 import { Redemption } from "../generated/schema";
 import {
   chainId,

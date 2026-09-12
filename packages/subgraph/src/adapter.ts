@@ -1,4 +1,4 @@
-import { X402ReceiptSettled } from "../generated/templates/NotaX402Settlement/NotaX402Settlement";
+import { X402ReceiptSettled } from "../generated/NotaX402Settlement/NotaX402Settlement";
 import { recordSettlement } from "./common";
 
 export function handleX402ReceiptSettled(event: X402ReceiptSettled): void {

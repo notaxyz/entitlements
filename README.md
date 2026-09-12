@@ -510,7 +510,8 @@ for the paid-resource protocol.
 
 [`packages/subgraph`](./packages/subgraph) contains the schema, event mappings, and
 deterministic tests for a read-only index of Nota purchase and redemption evidence.
-**Status: mappings built/tested; live-indexing preflight prepared. No subgraph has
+**Status: all three Base data sources configured; mappings built/tested and
+deployment-aware live-indexing preflight prepared. No subgraph has
 been published, no live indexing has been verified, and the backend does not query it yet.** World
 authentication remains a separate, pending integration.
 
@@ -541,10 +542,20 @@ replace the first buyer or purchase terms. A redemption without indexed purchase
 history creates an `UNKNOWN` purchase, not a fabricated receipt. `SETTLED` means an
 event was indexed, **not** that the current endpoint authorizes redemption.
 
-The manifest pins the existing Base store address and verified creation block
-`50,536,305` (deployment evidence below). Adapter and redemption mappings are currently uninstantiated
-templates: they compile and are tested, but index nothing until reviewed public
-deployment addresses, start blocks, and store/registry context are configured.
+The [manifest](./packages/subgraph/subgraph.yaml) pins three static Base data sources,
+each starting at its verified creation block:
+
+| Data source | Start block |
+| --- | --- |
+| Existing `NotaReceiptStore` | `50,536,305` |
+| `NotaX402Settlement` | `51,184,074` |
+| `EntitlementRedemption` | `51,184,221` |
+
+The new addresses match [`deployments/base.json`](./deployments/base.json) above.
+Every source uses the same chain/store/registry context, so adapter settlements and
+redemptions join the existing purchase evidence by `chainId:registry:purchaseRef`.
+There are no inactive templates, wildcard emitters, or automatic discovery of future
+deployments. Configuration tests catch drift in addresses, blocks, context, and handlers.
 A hosted subgraph cannot observe contracts deployed only on the local demo fork.
 
 Only public event fields are indexed. The schema contains neither `rawPurchaseRef`
@@ -595,6 +606,24 @@ preflight rechecks that evidence, the chain ID and registry wiring, and the actu
 at block `50,833,757`, log index `474`. This is **pre-existing receipt evidence**,
 not a new purchase or World-registration demonstration. No preimage bundle is needed.
 
+It also checks both new creation receipts against the deployment record, their runtime
+code hashes and store/registry wiring, the adapter's USDC address, redemption's exact
+accepted set of store + adapter, and the adapter's current registry authorization.
+Code and state reads share one RPC block, which is printed in the report; registry
+authorization can later be revoked. These are read-only checks, not transactions.
+The preflight transport allows only the required read methods. Rate-limit responses
+(including Base public RPC's `-32016`) get at most two retries with 5s/10s backoff;
+exhausted retries and all other RPC errors fail the check. Each request times out
+after 20 seconds. A rate-limited public RPC is not evidence of a contract failure.
+The selected RPC must serve historical transaction receipts and blocks as well as
+current state; some public providers restrict archive access. There is no automatic
+switch to another provider or bypass of failed evidence checks.
+
+Preparation validation on **2026-09-12**: the RPC-only preflight succeeded with
+deployment state checked at Base block **51,204,343**. It reported
+`RPC_EVIDENCE_VERIFIED_ONLY` and `graphVerified: false`; this did not query a live
+subgraph or prove that new purchase/redemption events have been indexed.
+
 ```sh
 # RPC-only preparation: no Graph account, keys, publication, or transactions.
 BASE_RPC_URL=https://your-base-rpc npm run subgraph:preflight
@@ -610,16 +639,23 @@ Without `GRAPH_QUERY_URL`, the command reports `RPC_EVIDENCE_VERIFIED_ONLY` with
 `graphVerified: false`. With it, the command requires the expected deployment CID,
 healthy index metadata and no more than 300 blocks of lag relative to RPC. It
 cross-checks the indexed block hash against RPC, selects an indexed, finalized
-snapshot, and paginates settlements at that fixed block hash using increasing IDs.
+snapshot after both contracts were deployed, and paginates settlements and redemptions
+at that fixed block hash using increasing IDs. Settlement kind/emitter pairs must be
+the configured store or adapter; redemptions must come from the configured redemption
+contract. Every row must use the expected chain/store/registry and fall between its
+source's start block and the selected snapshot.
 Missing metadata, GraphQL errors (even with partial data), a changed deployment or
 snapshot, invalid cursors, and exhausted page limits all fail the check. The cap is
-100 pages of 100 rows; a larger index requires an explicitly reviewed cap change,
+100 pages of 100 rows per entity type; a larger index requires an explicitly reviewed cap change,
 not a partial-success claim. Endpoint URLs and provider error details are not logged.
 
 Success compares receipt #1's public fields and log/block provenance against RPC
 and reports `INDEX_COMPATIBILITY_VERIFIED`. This is a compatibility check for that
-receipt plus source/pagination checks across the returned store settlements—not an
-independent audit of every indexed receipt and never permission to redeem. The
+receipt plus source/pagination checks across the returned store/adapter settlements
+and redemptions—not an independent audit of every indexed event and never permission
+to redeem. Adapter settlement and redemption counts are reported separately; zero
+new events is not proof that those live mappings work. A new public purchase and
+redemption must still be compared with RPC evidence for the connected demo. The
 actual Graph endpoint path remains unverified until a deployment is available;
 deterministic tests exercise its failure cases without credentials.
 
@@ -628,8 +664,9 @@ findings, select/create the Studio subgraph, and authorize deployment. Keep depl
 keys local; do not commit or paste them into documentation. Publishing a subgraph to
 the decentralized network and any associated on-chain spending require their own
 approval. Agent reconciliation follows live receipt validation; a public indexed
-purchase-to-redemption demo additionally requires approved public deployments of
-the new contracts. World registration can progress independently throughout.
+purchase-to-redemption demo additionally requires an approved new purchase and
+redemption using the recorded Base deployments. World registration can progress
+independently throughout.
 
 Implementation references: [Graph manifests](https://thegraph.com/docs/en/subgraphs/developing/creating/subgraph-manifest/),
 [GraphQL schemas](https://thegraph.com/docs/en/subgraphs/developing/creating/ql-schema/),

@@ -1,6 +1,8 @@
-import { createPublicClient, decodeEventLog, http } from "viem";
+import { createPublicClient, decodeEventLog } from "viem";
 import { receiptPurchasedV2Event } from "../../resource-server/src/redemption/abi.js";
 import { notaReceiptStoreAbi } from "../../x402-nota/src/abi.js";
+import { deployed, verifyDeployments } from "./deployments.js";
+import { preflightTransport } from "./rpc.js";
 import {
   baseline,
   checkedMeta,
@@ -9,23 +11,35 @@ import {
   graphQuery,
   healthQuery,
   scanSettlements,
+  scanRedemptions,
 } from "./index-verification.js";
+
+// Fixed stage names give operators useful diagnostics without logging RPC URLs,
+// response bodies, or provider errors that can contain credentials.
+let stage = "configuration";
 
 async function main(): Promise<void> {
   const rpcUrl = process.env.BASE_RPC_URL;
   if (!rpcUrl) throw new Error("BASE_RPC_URL_REQUIRED");
   const client = createPublicClient({
-    transport: http(rpcUrl, { timeout: 20_000, retryCount: 1 }),
+    transport: preflightTransport(rpcUrl),
   });
+  stage = "chain";
   if ((await client.getChainId()) !== baseline.chainId)
     throw new Error("WRONG_CHAIN");
+  const deploymentCheckBlock = await client.getBlockNumber();
+  stage = "new-deployments";
+  await verifyDeployments(client, deploymentCheckBlock);
+  stage = "baseline-registry";
   const registry = await client.readContract({
     address: baseline.store,
     abi: notaReceiptStoreAbi,
     functionName: "PURCHASE_REF_REGISTRY",
+    blockNumber: deploymentCheckBlock,
   });
   if (registry.toLowerCase() !== baseline.registry)
     throw new Error("REGISTRY_MISMATCH");
+  stage = "baseline-creation";
   const creation = await client.getTransactionReceipt({
     hash: baseline.creationTx,
   });
@@ -37,6 +51,7 @@ async function main(): Promise<void> {
   ) {
     throw new Error("CREATION_EVIDENCE_MISMATCH");
   }
+  stage = "compatibility-receipt";
   const receipt = await client.getTransactionReceipt({
     hash: baseline.receiptTx,
   });
@@ -46,6 +61,7 @@ async function main(): Promise<void> {
     receipt.blockHash !== baseline.receiptBlockHash
   )
     throw new Error("RECEIPT_EVIDENCE_MISMATCH");
+  stage = "compatibility-event";
   const log = receipt.logs.find(
     (item) => item.logIndex === baseline.receiptLogIndex,
   );
@@ -64,6 +80,7 @@ async function main(): Promise<void> {
   ) {
     throw new Error("RECEIPT_IDENTITY_MISMATCH");
   }
+  stage = "compatibility-block";
   const receiptBlock = await client.getBlock({
     blockNumber: receipt.blockNumber,
   });
@@ -86,6 +103,8 @@ async function main(): Promise<void> {
         {
           status: "RPC_EVIDENCE_VERIFIED_ONLY",
           creationBlock: baseline.creationBlock,
+          deployments: deployed,
+          deploymentCheckBlock: deploymentCheckBlock.toString(),
           receiptTx: baseline.receiptTx,
           graphVerified: false,
         },
@@ -95,6 +114,7 @@ async function main(): Promise<void> {
     );
     return;
   }
+  stage = "index-health";
   const deployment = process.env.GRAPH_DEPLOYMENT_ID;
   if (!deployment) throw new Error("GRAPH_DEPLOYMENT_ID_REQUIRED");
   const query = graphQuery(endpoint);
@@ -104,17 +124,24 @@ async function main(): Promise<void> {
     blockNumber: BigInt(index.number),
   });
   if (indexedBlock.hash !== index.hash) throw new Error("INDEX_NOT_CANONICAL");
+  stage = "index-snapshot";
   const finalized = await client.getBlock({ blockTag: "finalized" });
   const number =
     BigInt(index.number) < finalized.number
       ? BigInt(index.number)
       : finalized.number;
-  if (number < receipt.blockNumber) throw new Error("SNAPSHOT_BEFORE_RECEIPT");
+  if (number < BigInt(deployed.redemptionBlock))
+    throw new Error("SNAPSHOT_BEFORE_DEPLOYMENTS");
   const block = await client.getBlock({ blockNumber: number });
   const snapshot = { number: Number(number), hash: block.hash };
+  stage = "index-settlements";
   const rows = await scanSettlements(query, deployment, snapshot);
+  stage = "index-redemptions";
+  const redemptions = await scanRedemptions(query, deployment, snapshot);
+  stage = "index-receipt-parity";
   compareReceipt(rows, expected);
   // Catch a stalled or errored index during the paginated scan as well.
+  stage = "index-final-health";
   checkFreshness(
     checkedMeta(await query(healthQuery, {}), deployment),
     await client.getBlockNumber(),
@@ -126,9 +153,15 @@ async function main(): Promise<void> {
         deployment,
         snapshot,
         indexedSettlementCount: rows.length,
+        indexedAdapterSettlementCount: rows.filter(
+          (row) => row.kind === "X402_ADAPTER",
+        ).length,
+        indexedRedemptionCount: redemptions.length,
+        deployments: deployed,
+        deploymentCheckBlock: deploymentCheckBlock.toString(),
         receiptTx: baseline.receiptTx,
         scope:
-          "Existing store; receipt #1 compared to RPC. Not redemption authorization.",
+          "Receipt #1 compared to RPC; source and pagination checks for configured store, adapter and redemption. Zero new events is not proof of live adapter/redemption indexing; not an event-completeness audit or redemption authorization.",
       },
       null,
       2,
@@ -139,7 +172,7 @@ async function main(): Promise<void> {
 main().catch(() => {
   // URLs can embed API keys; provider error messages and response bodies are not logged.
   console.error(
-    "Subgraph preflight failed; no verification claim. Check configuration, RPC, index health and receipt parity. Provider details suppressed.",
+    `Subgraph preflight failed at ${stage}; no verification claim. Check configuration, RPC, index health and receipt parity. Provider details suppressed.`,
   );
   process.exitCode = 1;
 });

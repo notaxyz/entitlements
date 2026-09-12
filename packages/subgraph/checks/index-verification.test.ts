@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { deployed } from "./deployments.js";
 import {
   baseline,
   checkedMeta,
@@ -7,9 +9,10 @@ import {
   compareReceipt,
   graphQuery,
   scanSettlements,
+  scanRedemptions,
 } from "./index-verification.js";
 
-const snapshot = { number: 50834000, hash: `0x${"ab".repeat(32)}` };
+const snapshot = { number: 51185000, hash: `0x${"ab".repeat(32)}` };
 const deployment = "expected-deployment-cid";
 const meta = { deployment, hasIndexingErrors: false, block: snapshot };
 const row = (id: string) => ({
@@ -20,19 +23,67 @@ const row = (id: string) => ({
   emitter: baseline.store,
   kind: "STORE",
   purchaseRef: baseline.purchaseRef,
+  blockNumber: String(baseline.receiptBlock),
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("live index verification preparation", () => {
   it("pins the manifest to the verified creation block and deployment context", () => {
-    const manifest = readFileSync(
-      new URL("../subgraph.yaml", import.meta.url),
-      "utf8",
-    ).toLowerCase();
-    expect(manifest).toContain(`startblock: ${baseline.creationBlock}`);
-    expect(manifest).toContain(baseline.store);
-    expect(manifest).toContain(baseline.registry);
+    // Use Graph CLI's declared YAML parser, without adding another tooling dependency.
+    const require = createRequire(import.meta.url);
+    const graphRequire = createRequire(
+      require.resolve("@graphprotocol/graph-cli/package.json"),
+    );
+    const manifest = graphRequire("js-yaml").load(
+      readFileSync(new URL("../subgraph.yaml", import.meta.url), "utf8"),
+    );
+    expect(manifest.templates).toBeUndefined();
+    expect(manifest.dataSources).toHaveLength(3);
+    expect(deployed.store).toBe(baseline.store);
+    expect(deployed.registry).toBe(baseline.registry);
+    expect(deployed.chainId).toBe(baseline.chainId);
+    for (const [name, address, startBlock, handler, file] of [
+      [
+        "NotaReceiptStore",
+        baseline.store,
+        baseline.creationBlock,
+        "handleReceiptPurchasedV2",
+        "store",
+      ],
+      [
+        "NotaX402Settlement",
+        deployed.adapter,
+        deployed.adapterBlock,
+        "handleX402ReceiptSettled",
+        "adapter",
+      ],
+      [
+        "EntitlementRedemption",
+        deployed.redemption,
+        deployed.redemptionBlock,
+        "handleEntitlementRedeemed",
+        "redemption",
+      ],
+    ]) {
+      const source = manifest.dataSources.find(
+        (item: any) => item.name === name,
+      );
+      expect(source.network).toBe("base");
+      expect(source.source.address.toLowerCase()).toBe(address);
+      expect(source.source.startBlock).toBe(startBlock);
+      expect(source.source.abi).toBe(name);
+      expect(source.context.chainId).toEqual({ type: "BigInt", data: "8453" });
+      expect(source.context.store.type).toBe("Bytes");
+      expect(source.context.store.data.toLowerCase()).toBe(baseline.store);
+      expect(source.context.registry.type).toBe("Bytes");
+      expect(source.context.registry.data.toLowerCase()).toBe(
+        baseline.registry,
+      );
+      expect(source.mapping.file).toBe(`./src/${file}.ts`);
+      expect(source.mapping.eventHandlers).toHaveLength(1);
+      expect(source.mapping.eventHandlers[0].handler).toBe(handler);
+    }
   });
 
   it("rejects missing metadata, index errors and a different deployment", () => {
@@ -124,6 +175,75 @@ describe("live index verification preparation", () => {
       compareReceipt([receipt, receipt], { amount: "100000" }),
     ).toThrow();
     expect(() => compareReceipt([receipt], { amount: "1" })).toThrow();
+  });
+
+  it("accepts only the pinned adapter with the matching event kind and start block", async () => {
+    const adapter = {
+      ...row("a"),
+      emitter: deployed.adapter,
+      kind: "X402_ADAPTER",
+      blockNumber: String(deployed.adapterBlock),
+    };
+    const query = (item: object) =>
+      vi.fn().mockResolvedValue({ _meta: meta, settlements: [item] });
+    expect(await scanSettlements(query(adapter), deployment, snapshot)).toEqual(
+      [adapter],
+    );
+    for (const bad of [
+      { ...adapter, kind: "STORE" },
+      { ...adapter, emitter: baseline.store },
+      { ...adapter, emitter: deployed.redemption },
+      { ...adapter, blockNumber: String(deployed.adapterBlock - 1) },
+      { ...adapter, blockNumber: String(snapshot.number + 1) },
+      { ...adapter, blockNumber: "invalid" },
+    ])
+      await expect(
+        scanSettlements(query(bad), deployment, snapshot),
+      ).rejects.toThrow("INVALID_CURSOR_OR_SOURCE");
+  });
+
+  it("scans redemptions at the same snapshot and fails closed on foreign deployments", async () => {
+    const redemption = {
+      ...row("a"),
+      redemptionContract: deployed.redemption,
+      blockNumber: String(deployed.redemptionBlock),
+    };
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ _meta: meta, redemptions: [redemption] })
+      .mockResolvedValueOnce({ _meta: meta, redemptions: [] });
+    expect(await scanRedemptions(query, deployment, snapshot, 1)).toEqual([
+      redemption,
+    ]);
+    expect(query.mock.calls[0]![0]).toContain("redemptions(block:");
+    expect(query.mock.calls[1]![1]).toEqual({
+      block: { hash: snapshot.hash },
+      cursor: "a",
+      first: 1,
+    });
+    for (const bad of [
+      { ...redemption, redemptionContract: deployed.adapter },
+      { ...redemption, registry: deployed.adapter },
+      { ...redemption, chainId: "1" },
+      { ...redemption, blockNumber: String(deployed.redemptionBlock - 1) },
+    ])
+      await expect(
+        scanRedemptions(
+          vi.fn().mockResolvedValue({ _meta: meta, redemptions: [bad] }),
+          deployment,
+          snapshot,
+        ),
+      ).rejects.toThrow();
+    await expect(
+      scanRedemptions(
+        vi.fn().mockResolvedValue({
+          _meta: { ...meta, hasIndexingErrors: true },
+          redemptions: [],
+        }),
+        deployment,
+        snapshot,
+      ),
+    ).rejects.toThrow();
   });
 
   it("rejects partial GraphQL results and HTTP errors without exposing provider details", async () => {
