@@ -1,0 +1,52 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "recordedAt": "2026-09-12T10:20:38Z",
+  "sourceCommit": "5e9d14b80cd41a31a9f2537b1d1b55ef71e8e24f",
+  "sourceCommitNote": "The ABI fixes were deployed from the working tree and then committed here. This is the corresponding source commit, not a claim that it existed before the upload.",
+  "studio": {
+    "slug": "nota-entitlements",
+    "versionLabel": "v0.0.1",
+    "url": "https://thegraph.com/studio/subgraph/nota-entitlements",
+    "queryUrl": "https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1",
+    "deploymentCid": "QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp",
+    "deploymentSucceeded": true,
+    "publishedToDecentralizedNetwork": false
+  },
+  "verification": {
+    "verifiedOn": "2026-09-12",
+    "command": "npm run subgraph:preflight",
+    "rpcUrl": "https://mainnet.base.org",
+    "status": "INDEX_COMPATIBILITY_VERIFIED",
+    "deployment": "QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp",
+    "snapshot": {
+      "number": 51208878,
+      "hash": "0x68dd920f52a5bdac02c99759950abb88b928d53ada1b11efa21fb98c1a1c0cc6"
+    },
+    "deploymentCheckBlock": "51209480",
+    "indexedSettlementCount": 1,
+    "indexedAdapterSettlementCount": 0,
+    "indexedRedemptionCount": 0,
+    "receiptTx": "0x3b9656b4a67dee38ca2bd28d8841fbb67469c0ed3f9ace2977e5b753e7230978",
+    "receiptBlock": 50833757,
+    "receiptLogIndex": 474,
+    "purchaseRef": "0x5333d780992fdf98c143083b765392aeaa27cb393a034235026f57f202806770",
+    "checksPassed": [
+      "Expected deployment CID and no reported indexing errors",
+      "Index freshness within the configured 300-block limit before and after scanning",
+      "Indexed block hash matched Base RPC; pagination pinned to an indexed finalized snapshot",
+      "Configured emitter, chain, registry, store and start-block checks on returned evidence",
+      "Existing receipt #1 public fields and log/block provenance matched Base RPC",
+      "Contract creation receipts, runtime hashes, store/registry/token wiring, accepted consumers and adapter registry authorization matched the deployment record"
+    ],
+    "scope": "Receipt #1 compared to RPC; source and pagination checks for configured store, adapter and redemption. Zero new events is not proof of live adapter/redemption indexing; not an event-completeness audit or redemption authorization."
+  },
+  "scope": {
+    "contractDeploymentRecord": "deployments/base.json",
+    "backendQueriesLiveSubgraph": false,
+    "newPublicPurchaseAndRedemptionDemoRecorded": false,
+    "worldRegistrationVerified": false,
+    "deploymentToolDependencyAdvisoriesResolved": false,
+    "note": "This is a historical verification snapshot, not a guarantee of current endpoint availability, freshness or registry authorization. Studio deployment is separate from decentralized-network publication. No deploy keys, wallet credentials or redemption preimage bundles are recorded."
+  }
+}

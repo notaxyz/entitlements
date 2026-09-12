@@ -510,10 +510,33 @@ for the paid-resource protocol.
 
 [`packages/subgraph`](./packages/subgraph) contains the schema, event mappings, and
 deterministic tests for a read-only index of Nota purchase and redemption evidence.
-**Status: all three Base data sources configured; mappings built/tested and
-deployment-aware live-indexing preflight prepared. No subgraph has
-been published, no live indexing has been verified, and the backend does not query it yet.** World
+**Status: deployed to Studio; live baseline-receipt compatibility verified on
+2026-09-12. All three Base data sources are configured. Decentralized-network
+publication and backend integration are not complete.** No new adapter settlements
+or redemptions were present at the verified snapshot. World
 authentication remains a separate, pending integration.
+
+### Studio deployment and verification evidence
+
+- [Studio: Nota Entitlements](https://thegraph.com/studio/subgraph/nota-entitlements), version `v0.0.1`.
+- [Query endpoint](https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1).
+- Deployment CID: `QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp`.
+- Machine-readable evidence: [`deployments/subgraph-base.json`](./deployments/subgraph-base.json).
+
+The live preflight returned `INDEX_COMPATIBILITY_VERIFIED` at finalized snapshot
+block **51,208,878**, hash
+`0x68dd920f52a5bdac02c99759950abb88b928d53ada1b11efa21fb98c1a1c0cc6`.
+Contract wiring and registry authorization were checked separately at block
+**51,209,480**. The index reported no indexing errors and passed the freshness,
+source and pagination checks. **One existing store settlement** matched receipt #1
+against Base RPC; **zero adapter settlements and zero redemptions** were returned.
+These counts describe that snapshot, not current totals or proof of a new connected demo.
+
+The first upload failed because the event JSON ABIs omitted explicit `anonymous`
+and non-indexed input flags. Those defaults are now explicit in all three ABI files,
+with a regression test; the successful deployment above contains the corrected ABIs.
+No Solidity change or contract redeployment was required. The corresponding source
+is commit `5e9d14b80cd41a31a9f2537b1d1b55ef71e8e24f`, committed after the upload.
 
 ```mermaid
 flowchart LR
@@ -628,10 +651,10 @@ subgraph or prove that new purchase/redemption events have been indexed.
 # RPC-only preparation: no Graph account, keys, publication, or transactions.
 BASE_RPC_URL=https://your-base-rpc npm run subgraph:preflight
 
-# After approved deployment: use the query URL and exact deployment CID from Studio.
+# Recheck the recorded Studio deployment (read-only).
 BASE_RPC_URL=https://your-base-rpc \
-GRAPH_QUERY_URL=https://your-subgraph-query-endpoint \
-GRAPH_DEPLOYMENT_ID=your-deployment-cid \
+GRAPH_QUERY_URL=https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1 \
+GRAPH_DEPLOYMENT_ID=QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp \
 npm run subgraph:preflight
 ```
 
@@ -656,12 +679,14 @@ and redemptions—not an independent audit of every indexed event and never perm
 to redeem. Adapter settlement and redemption counts are reported separately; zero
 new events is not proof that those live mappings work. A new public purchase and
 redemption must still be compared with RPC evidence for the connected demo. The
-actual Graph endpoint path remains unverified until a deployment is available;
-deterministic tests exercise its failure cases without credentials.
+recorded Studio endpoint passed this compatibility check on 2026-09-12;
+rerun it before relying on a current view. Deterministic tests exercise its failure
+cases without credentials.
 
-Next approval gate: review this preparation, resolve the deployment-tool dependency
-findings, select/create the Studio subgraph, and authorize deployment. Keep deployment
-keys local; do not commit or paste them into documentation. Publishing a subgraph to
+Next steps: connect agent history/reconciliation to the live index and resolve the
+still-open deployment-tool dependency findings. Studio deployment did not resolve
+those advisories. Keep deployment keys local; do not commit or paste them into
+documentation. Publishing a subgraph to
 the decentralized network and any associated on-chain spending require their own
 approval. Agent reconciliation follows live receipt validation; a public indexed
 purchase-to-redemption demo additionally requires an approved new purchase and
