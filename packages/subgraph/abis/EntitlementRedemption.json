@@ -2,6 +2,7 @@
   {
     "name": "EntitlementRedeemed",
     "type": "event",
+    "anonymous": false,
     "inputs": [
       {
         "type": "bytes32",
@@ -15,7 +16,8 @@
       },
       {
         "type": "uint64",
-        "name": "redeemedAt"
+        "name": "redeemedAt",
+        "indexed": false
       }
     ]
   }

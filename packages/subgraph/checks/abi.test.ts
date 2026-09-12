@@ -21,7 +21,17 @@ describe("subgraph event ABI parity", () => {
       const abi = JSON.parse(
         readFileSync(new URL(`../abis/${name}.json`, import.meta.url), "utf8"),
       );
-      expect(abi).toEqual([event]);
+      // viem omits false defaults; Graph Node's ABI deserializer requires them.
+      // Normalize the expected decoder ABI, never the JSON under test, so missing
+      // fields in any shipped event/input fail this regression check.
+      expect(event).toBeDefined();
+      expect(abi).toEqual([
+        {
+          anonymous: false,
+          ...event!,
+          inputs: event!.inputs.map((input) => ({ indexed: false, ...input })),
+        },
+      ]);
     });
   }
 });
