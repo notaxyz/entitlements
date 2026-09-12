@@ -532,6 +532,16 @@ source and pagination checks. **One existing store settlement** matched receipt 
 against Base RPC; **zero adapter settlements and zero redemptions** were returned.
 These counts describe that snapshot, not current totals or proof of a new connected demo.
 
+**Live connected demo indexed (2026-09-12).** The Base mainnet demo purchase
+(`purchaseRef` `0xb336…6b94`, listing 2, 0.10 USDC) is indexed by the same deployment
+with no indexing errors: its `X402_ADAPTER` settlement
+([`0xa5ad9c2e…`](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e),
+block 51,220,814, log 247) and redemption
+([`0x59207b64…`](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194),
+block 51,220,820, log 702) matched the recorded transactions, block hashes and Base RPC
+log indexes. This covers that one purchase, not event completeness; details are under
+`publicDemo.indexVerification` in both deployment manifests.
+
 The first upload failed because the event JSON ABIs omitted explicit `anonymous`
 and non-indexed input flags. Those defaults are now explicit in all three ABI files,
 with a regression test; the successful deployment above contains the corrected ABIs.

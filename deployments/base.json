@@ -74,7 +74,9 @@
     "deployerNonce": 7,
     "constructorArgs": [
       "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
-      ["0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"]
+      [
+        "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"
+      ]
     ],
     "store": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
     "purchaseRefRegistry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
@@ -89,9 +91,105 @@
     "verificationUrl": "https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code"
   },
   "scope": {
-    "newPublicPurchaseAndRedemptionDemoRecorded": false,
+    "newPublicPurchaseAndRedemptionDemoRecorded": true,
     "subgraphPublished": false,
     "worldRegistrationVerified": false,
     "note": "Deployment and source verification are not proof of live application integration, a security audit, fulfillment, or human-backed agent authentication. Registry authorization is a checked snapshot and can be revoked by its owner."
+  },
+  "publicDemo": {
+    "network": "base",
+    "chainId": 8453,
+    "recordedAt": "2026-09-12T16:36:35.607Z",
+    "listingId": "2",
+    "purchaseRef": "0xb3368376783682607e36f2c62fc198957bddea962dd42f20af05a0ffd57e6b94",
+    "seller": "0x6207CADC1A3Af0E1A2fF0f7fDb80793E84596fDe",
+    "buyer": "0x41F14BbEE2936C3cB21Fda7f56f66972BB4Fa1D4",
+    "relayer": "0x6207CADC1A3Af0E1A2fF0f7fDb80793E84596fDe",
+    "adapter": "0x59d3076857972372ecc2e845a7e57a83bb9dddc8",
+    "redemptionContract": "0xde4f712fa5b5be32766c34885b334f1d8e573882",
+    "amount": "100000",
+    "tokenSymbol": "USDC",
+    "transactions": {
+      "listing": {
+        "hash": "0xd9ed7cc8c3ed38e6bd9ab6e7abf1ac4625c74dd4a50ccff6d70a2d8c46db6d3b",
+        "url": "https://basescan.org/tx/0xd9ed7cc8c3ed38e6bd9ab6e7abf1ac4625c74dd4a50ccff6d70a2d8c46db6d3b",
+        "blockNumber": "51220809",
+        "blockHash": "0x28e7c371a35d93ef1bb90a523ce03a88038f51bb04a297608aa7e3d4e97a386b"
+      },
+      "settlement": {
+        "hash": "0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e",
+        "url": "https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e",
+        "blockNumber": "51220814",
+        "blockHash": "0xe513c3e57b72b6269810903cf6b9b2968f1ce5038364c339094f765be4464100"
+      },
+      "redemption": {
+        "hash": "0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194",
+        "url": "https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194",
+        "blockNumber": "51220820",
+        "blockHash": "0xa167c1a3daf8009323282440a02d1a2df654b83bd1e62901a8f622480c431dc6"
+      }
+    },
+    "authentication": {
+      "mode": "mock-wallet",
+      "humanVerified": false,
+      "worldRegistrationVerified": false
+    },
+    "scenarios": {
+      "attacker": {
+        "status": 403,
+        "code": "BUYER_MISMATCH",
+        "step": 6,
+        "transactionsSent": 0
+      },
+      "buyer": {
+        "status": 201
+      },
+      "replay": {
+        "status": 409,
+        "code": "ALREADY_REDEEMED",
+        "step": 5,
+        "transactionsSent": 0
+      }
+    },
+    "buyerTransactionsSent": 0,
+    "indexVerification": {
+      "status": "EVENTS_INDEXED_AND_MATCHED",
+      "verifiedOn": "2026-09-12",
+      "method": "Studio GraphQL query by purchaseRef; returned events compared with the recorded transactions and Base RPC receipts",
+      "queryUrl": "https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1",
+      "deployment": "QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp",
+      "hasIndexingErrors": false,
+      "indexedBlock": {
+        "number": "51221518",
+        "hash": "0x0efd739ab8f318e0a3dafaa968ef401d234eb24f7b4518f3d1803400999fe21a"
+      },
+      "purchase": {
+        "id": "8453:0x9aaffa5787ca332a40b9c98e3e5323a97f96d991:0xb3368376783682607e36f2c62fc198957bddea962dd42f20af05a0ffd57e6b94",
+        "status": "SETTLED",
+        "settlementCount": "1",
+        "listingId": "2",
+        "amount": "100000"
+      },
+      "settlement": {
+        "kind": "X402_ADAPTER",
+        "emitter": "0x59d3076857972372ecc2e845a7e57a83bb9dddc8",
+        "transactionHash": "0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e",
+        "blockNumber": "51220814",
+        "logIndex": "247"
+      },
+      "redemption": {
+        "redemptionContract": "0xde4f712fa5b5be32766c34885b334f1d8e573882",
+        "transactionHash": "0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194",
+        "blockNumber": "51220820",
+        "logIndex": "702"
+      },
+      "checksPassed": [
+        "Expected deployment CID with no reported indexing errors; indexed head past both demo blocks",
+        "Settlement and redemption transaction hash, block number and block hash matched the recorded evidence",
+        "Log indexes matched Base RPC receipts; each receipt has exactly one adapter or redemption log",
+        "Buyer, seller, amount, listing, emitter and redemption contract matched the demo"
+      ],
+      "scope": "This demo purchase only; not an event-completeness audit, fulfillment proof or redemption authorization."
+    }
   }
 }

@@ -245,11 +245,18 @@ describe("live demo safety gates and evidence", () => {
     const root = await mkdtemp(path.join(tmpdir(), "nota-live-evidence-"));
     dirs.push(root);
     await mkdir(path.join(root, "deployments"));
-    for (const name of ["base.json", "subgraph-base.json"])
+    for (const name of ["base.json", "subgraph-base.json"]) {
+      // Start from the pre-demo state: the real manifests now hold the recorded Base demo.
+      const manifest = JSON.parse(
+        await readFile(path.join(repoRoot, "deployments", name), "utf8"),
+      );
+      delete manifest.publicDemo;
+      manifest.scope.newPublicPurchaseAndRedemptionDemoRecorded = false;
       await writeFile(
         path.join(root, "deployments", name),
-        await readFile(path.join(repoRoot, "deployments", name)),
+        JSON.stringify(manifest, null, 2) + "\n",
       );
+    }
     const evidence = {
       chainId: 8453,
       adapter: deployed.adapter,
