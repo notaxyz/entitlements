@@ -33,12 +33,12 @@ export interface DemoStep {
 /** One real HTTP purchase, using the buyer's original bundle for every redemption attempt. */
 export async function runConnectedDemo(
   f: Fixture,
-  onStep: (step: DemoStep) => void = () => {},
+  onStep: (step: DemoStep) => void | Promise<void> = () => {},
 ) {
   const transcript: DemoStep[] = [];
-  const report = (step: DemoStep) => {
+  const report = async (step: DemoStep) => {
     transcript.push(step);
-    onStep(step);
+    await onStep(step);
   };
   let purchaseRef: Hex | undefined;
   let quoteResponses = 0;
@@ -82,7 +82,7 @@ export async function runConnectedDemo(
       assert.equal(BigInt(extension.quote.listingId), f.listingId);
       assert.equal(BigInt(extension.quote.amount), f.paymentAmount ?? 10_000_000n, "Quote must match the explicitly selected amount before signing");
       purchaseRef = extension.quote.purchaseRef;
-      report({ stage: "payment.required", status: 402, purchaseRef });
+      await report({ stage: "payment.required", status: 402, purchaseRef });
     }
     if (url.href === `${f.facilitatorUrl}/settle`) {
       settlementRequests++;
@@ -102,7 +102,7 @@ export async function runConnectedDemo(
         txHash: Hex;
       };
       assert.equal(settled.purchaseRef, purchaseRef);
-      report({
+      await report({
         stage: "payment.settled",
         status: 200,
         purchaseRef: settled.purchaseRef,
@@ -164,7 +164,7 @@ export async function runConnectedDemo(
   assert(
     isAddressEqual(await f.redemptionChain.consumedBy(purchaseRef!), f.adapter),
   );
-  report({
+  await report({
     stage: "access.authenticated",
     status: 200,
     purchaseRef: purchaseRef!,
@@ -202,7 +202,7 @@ export async function runConnectedDemo(
     paid.entitlement.rawPurchaseRef,
   );
   assert.equal(settlementRequests, 1, "Recovery must not buy again");
-  report({ stage: "access.recovered", status: 200, purchaseRef: purchaseRef! });
+  await report({ stage: "access.recovered", status: 200, purchaseRef: purchaseRef! });
 
   const input = { ...paid.entitlement, purchaseTxHash: paid.receipt.txHash };
   const sellerNonceBefore = await f.publicClient.getTransactionCount({
@@ -224,7 +224,7 @@ export async function runConnectedDemo(
     blockBefore,
   );
   assert.equal(await f.redemptionChain.redeemedAt(purchaseRef!), 0n);
-  report({
+  await report({
     stage: "attacker.rejected",
     status: 403,
     purchaseRef: purchaseRef!,
@@ -263,7 +263,7 @@ export async function runConnectedDemo(
     await f.redemptionChain.redeemedAt(purchaseRef!),
     event.args.redeemedAt,
   );
-  report({
+  await report({
     stage: "buyer.redeemed",
     status: 201,
     purchaseRef: purchaseRef!,
@@ -293,7 +293,7 @@ export async function runConnectedDemo(
     await f.publicClient.getTransactionCount({ address: f.buyer }),
     buyerNonceBefore,
   );
-  report({
+  await report({
     stage: "replay.rejected",
     status: 409,
     purchaseRef: purchaseRef!,

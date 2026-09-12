@@ -780,6 +780,52 @@ The same runner is exercised by `packages/e2e/test/connected-flow.test.ts`. That
 integration test skips without `BASE_RPC_URL`; deterministic backend and local-EVM
 tests continue to run without an external RPC. Scripts do not automatically load `.env`.
 
+### Recording with story mode
+
+```sh
+npm run demo:connected -- --story         # disposable fork, no real spending
+npm run demo:connected -- --live --story  # real Base funds; same confirmation and safety gates
+```
+
+An interactive terminal is required. Six title cards cover **offer → payment →
+entitlement → attacker → redemption → record**, with an Enter pause after each act.
+Without `--story`, the JSON transcript and unattended flow are unchanged. Story mode
+only observes the existing flow and awaits its step callbacks; it does not buy again,
+submit a replay transaction, or query the index.
+
+Act 1 independently checks the inline metadata hash and line-item total before its
+pause; the client still performs all its normal bundle, deployment and seller-quote
+checks before signing. Advance this first pause within the existing 15-minute quote
+window; expiration fails closed, with no automatic re-quote or payment retry. The other
+pauses are outside live authentication challenges. Buyer ETH is printed as measured
+(zero on the fork, possibly nonzero on Base), with the unchanged transaction count.
+
+The bundle is buyer-generated and recovered after authenticated access, not created
+by the payment response. Possession alone is insufficient: the endpoint also checks
+the buyer wallet. Replay is rejected **by the endpoint using on-chain `redeemedAt`**,
+without a second transaction; the video must not call it an on-chain reverted replay.
+Authentication remains mock-wallet, not World verification.
+
+The cards show the verified line-item amounts, metadata hash, buyer wallet and
+transaction count, gas payer, and the attacker/replay rejection reasons. No bundle
+values or arbitrary metadata text are printed.
+
+The final act prints the Studio endpoint, public `purchaseRef` and a query to paste.
+On a fork it explicitly switches to the **separate, previously recorded mainnet
+purchase** in `deployments/base.json`, with its settlement/redemption links and
+mainnet query. The walkthrough's local reference is labeled separately: it will
+not appear in the public index. In live mode the query uses the current purchase.
+No query is executed or fresh indexing-success claim made; live indexing may lag.
+Public transaction URLs are printed on their own lines.
+
+Ctrl-C stops at a completed step or prompt and releases the live run lock; confirmed
+transactions are not undone and private recovery files remain. During an in-flight
+operation cancellation waits for a safe boundary. An uncertain RPC/send failure still
+retains the lock. After any partial run, reconcile the transaction journal before
+retrying: a new run is a new purchase, not a resume. Existing recorded-demo and
+state-directory guards remain in place; `--story` does not bypass them. Nothing is
+committed automatically.
+
 ### Connected demo on deployed Base mainnet contracts
 
 **Real spending, opt-in only.** The default `npm run demo:connected` remains fork-only.
@@ -837,7 +883,8 @@ Never blindly retry after a send timeout or partial failure: reconcile printed h
 first. A new run creates a new listing/purchase; it is not a resume command. The
 runner refuses an existing state directory or replacement of an already recorded demo.
 A `private-data/live-demo.lock` prevents concurrent runs and remains after an incomplete
-run. It is removed automatically only after successful evidence recording; reconcile
+run. It is removed automatically after successful evidence recording or a controlled
+story cancellation at a completed step/prompt; reconcile
 the previous run before manually removing a retained lock, even if startup failed.
 
 Only after all three scenarios and the confirmed event/receipt checks pass does it

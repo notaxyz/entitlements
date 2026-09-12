@@ -15,11 +15,14 @@ export const LIVE_CONFIRMATION = "SPEND ON BASE";
 export class LiveConfigError extends Error {}
 
 export function demoMode(args: string[]): "fork" | "live" {
-  if (args.length === 0) return "fork";
-  if (args.length === 1 && args[0] === "--live") return "live";
-  throw new LiveConfigError(
-    "Use no flags for a fork, or --live for Base mainnet",
-  );
+  if (
+    new Set(args).size !== args.length ||
+    args.some((arg) => !["--live", "--story"].includes(arg))
+  )
+    throw new LiveConfigError(
+      "Use --story for narration, --live for Base mainnet, or both; no other flags",
+    );
+  return args.includes("--live") ? "live" : "fork";
 }
 
 export function requireLiveConfirmation(
@@ -98,7 +101,7 @@ export function readLiveConfig(env: NodeJS.ProcessEnv) {
 
 export type LiveConfig = ReturnType<typeof readLiveConfig>;
 
-/** Fail closed across concurrent invocations and partial runs; release only after full success. */
+/** Fail closed across concurrent/partial runs; caller releases on success or a safe story cancellation. */
 export async function acquireLiveRunLock(
   root = repoRoot,
 ): Promise<() => Promise<void>> {

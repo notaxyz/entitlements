@@ -156,28 +156,36 @@ describe("live demo safety gates and evidence", () => {
       expect(() => requireLiveConfirmation(answer, true)).toThrow();
     expect(() => requireLiveConfirmation(LIVE_CONFIRMATION, false)).toThrow();
   });
-  it("the actual CLI refuses --live without a TTY before contacting any RPC", () => {
-    try {
-      execFileSync(
-        process.execPath,
-        ["--import", "tsx", "packages/e2e/scripts/connected-demo.ts", "--live"],
-        {
-          cwd: repoRoot,
-          env: { ...process.env, ...env },
-          input: "SPEND ON BASE\n",
-          stdio: "pipe",
-          timeout: 15_000,
-        },
-      );
-      throw new Error("CLI should refuse piped confirmation");
-    } catch (error) {
-      const result = error as { status: number; stderr: Buffer };
-      expect(result.status).toBe(1);
-      expect(result.stderr.toString()).toContain("failed or was cancelled");
-      expect(result.stderr.toString()).not.toContain(sellerKey);
-      expect(result.stderr.toString()).not.toContain(buyerKey);
-    }
-  });
+  it.each([["--live"], ["--story"], ["--live", "--story"]])(
+    "the actual CLI refuses interactive flags %j without a TTY before contacting any RPC",
+    (...args) => {
+      try {
+        execFileSync(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            "packages/e2e/scripts/connected-demo.ts",
+            ...args,
+          ],
+          {
+            cwd: repoRoot,
+            env: { ...process.env, ...env },
+            input: "SPEND ON BASE\n",
+            stdio: "pipe",
+            timeout: 15_000,
+          },
+        );
+        throw new Error("CLI should refuse piped confirmation");
+      } catch (error) {
+        const result = error as { status: number; stderr: Buffer };
+        expect(result.status).toBe(1);
+        expect(result.stderr.toString()).toContain("failed or was cancelled");
+        expect(result.stderr.toString()).not.toContain(sellerKey);
+        expect(result.stderr.toString()).not.toContain(buyerKey);
+      }
+    },
+  );
   it("requires explicit bounded USDC, distinct buyer and protected recovery location", () => {
     const config = readLiveConfig(env);
     expect(config.amount).toBe(100_000n);

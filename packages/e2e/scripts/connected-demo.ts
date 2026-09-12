@@ -4,6 +4,8 @@ import { createInterface } from "node:readline/promises";
 import { appendFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createStory, StoryCancelled, storyTerminal } from "../src/story.js";
+import type { Fixture } from "../src/fixture.js";
 import {
   acquireLiveRunLock,
   demoMode,
@@ -21,7 +23,12 @@ import {
 } from "../src/live-evidence.js";
 
 async function main() {
-  if (demoMode(process.argv.slice(2)) === "live") return runLive();
+  const args = process.argv.slice(2);
+  const mode = demoMode(args);
+  const story = args.includes("--story");
+  if (story && (!process.stdin.isTTY || !process.stdout.isTTY))
+    throw new LiveConfigError("Story mode requires an interactive terminal");
+  if (mode === "live") return runLive(story);
   if (!process.env.BASE_RPC_URL) throw new Error("Missing fork source");
   console.info(
     "BASE FORK ONLY: real deployed Nota/USDC dependencies, new contracts deployed locally. No public-chain transactions.",
@@ -33,10 +40,9 @@ async function main() {
     "BUNDLE: buyer-generated before checkout, shared privately with merchant/configured RPC; excluded from payment messages and logs.",
   );
   const fixture = await startFixture();
+  const terminal = story ? storyTerminal() : undefined;
   try {
-    await runConnectedDemo(fixture, (step) =>
-      console.info(JSON.stringify(step)),
-    );
+    await runPresented(fixture, terminal);
     console.info(
       "PASS: one purchase, attacker rejected before redemption, buyer redeemed once, replay rejected. Buyer sent no transactions and held zero ETH.",
     );
@@ -44,11 +50,50 @@ async function main() {
       "All displayed transaction hashes belong to the disposable local fork, not Base mainnet.",
     );
   } finally {
+    terminal?.close();
     await fixture.stop();
   }
 }
 
-async function runLive() {
+async function runPresented(
+  fixture: Fixture,
+  terminal?: ReturnType<typeof storyTerminal>,
+) {
+  if (!terminal)
+    return runConnectedDemo(fixture, (step) =>
+      console.info(
+        JSON.stringify({
+          ...step,
+          ...(fixture.mode === "live" && step.transactionHash
+            ? { url: `https://basescan.org/tx/${step.transactionHash}` }
+            : {}),
+        }),
+      ),
+    );
+  const narrator = createStory(
+    fixture,
+    terminal.pause,
+    console.info,
+    terminal.check,
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = narrator.observeFetch(originalFetch);
+  try {
+    await narrator.start();
+    const steps = await runConnectedDemo(fixture, narrator.onStep);
+    await narrator.finish();
+    return steps;
+  } catch (error) {
+    // payAndFetch intentionally sanitizes checkout exceptions, including an Act 1
+    // cancellation. Preserve cancellation identity without exposing its request body.
+    if (terminal.stoppedAtBoundary()) throw new StoryCancelled();
+    throw error;
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+async function runLive(story = false) {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new LiveConfigError(
       "Interactive terminal required; run directly, without a pipe or output redirection",
@@ -71,17 +116,19 @@ async function runLive() {
     );
   // Read-only: surface configuration, balance and RPC problems before confirmation and the run lock.
   await preflightLive(config);
-  console.info(
-    JSON.stringify({
-      mode: "BASE MAINNET — REAL FUNDS",
-      seller: config.seller,
-      buyer: config.buyer,
-      relayer: config.relayer,
-      amountUSDCBaseUnits: config.amount.toString(),
-      adapter: manifests[0].notaX402Settlement.address,
-      redemption: manifests[0].entitlementRedemption.address,
-    }),
-  );
+  const summary = {
+    mode: "BASE MAINNET — REAL FUNDS",
+    seller: config.seller,
+    buyer: config.buyer,
+    relayer: config.relayer,
+    amountUSDCBaseUnits: config.amount.toString(),
+    adapter: manifests[0].notaX402Settlement.address,
+    redemption: manifests[0].entitlementRedemption.address,
+  };
+  if (story) {
+    for (const [label, value] of Object.entries(summary))
+      console.info(`${label.padEnd(22)} ${value}`);
+  } else console.info(JSON.stringify(summary));
   console.info(
     "AUTHENTICATION: mock-wallet signatures, humanVerified=false; not World ID or AgentBook verification.",
   );
@@ -106,32 +153,26 @@ async function runLive() {
   } finally {
     terminal.close();
   }
-  // Retain this lock on ANY incomplete live run, including uncertain send outcomes.
+  // Retain on failure/uncertain send; only controlled story-boundary cancellation is exempt.
   const releaseRunLock = await acquireLiveRunLock();
-  const fixture = await startLiveFixture(config, (kind, hash) => {
-    const record = {
-      kind,
-      transactionHash: hash,
-      url: `https://basescan.org/tx/${hash}`,
-    };
-    console.info(JSON.stringify(record));
-    appendFileSync(
-      path.join(config.stateDir, "transactions.jsonl"),
-      JSON.stringify(record) + "\n",
-      { mode: 0o600 },
-    );
-  });
+  const storyInput = story ? storyTerminal() : undefined;
+  let fixture: Awaited<ReturnType<typeof startLiveFixture>> | undefined;
   try {
-    const steps = await runConnectedDemo(fixture, (step) =>
-      console.info(
-        JSON.stringify({
-          ...step,
-          ...(step.transactionHash
-            ? { url: `https://basescan.org/tx/${step.transactionHash}` }
-            : {}),
-        }),
-      ),
-    );
+    fixture = await startLiveFixture(config, (kind, hash) => {
+      const record = {
+        kind,
+        transactionHash: hash,
+        url: `https://basescan.org/tx/${hash}`,
+      };
+      if (story) console.info(`\n${kind} submitted\n${record.url}\n`);
+      else console.info(JSON.stringify(record));
+      appendFileSync(
+        path.join(config.stateDir, "transactions.jsonl"),
+        JSON.stringify(record) + "\n",
+        { mode: 0o600 },
+      );
+    });
+    const steps = await runPresented(fixture, storyInput);
     const evidence = await collectLiveEvidence(fixture, steps);
     await writeFile(
       path.join(config.stateDir, "public-evidence.json"),
@@ -143,12 +184,29 @@ async function runLive() {
     console.info(
       "PASS (Base): purchase, access recovery, attacker rejection, buyer redemption and replay verified. Both manifests updated; buyer sent no transactions. New Graph event parity remains pending. Review before committing.",
     );
+  } catch (error) {
+    // StoryCancelled is raised only at a completed step / prompt, not an uncertain send.
+    if (error instanceof StoryCancelled) {
+      await releaseRunLock();
+      console.info(
+        "Stopped at a story boundary; live lock released. Private recovery files retained. Reconcile existing transactions before any new purchase; this is not a resume.",
+      );
+    }
+    throw error;
   } finally {
-    await fixture.stop();
+    storyInput?.close();
+    await fixture?.stop();
   }
 }
 
 main().catch((error) => {
+  if (error instanceof StoryCancelled) {
+    console.info(
+      "Story stopped. No completion claim; already confirmed transactions are not undone.",
+    );
+    process.exitCode = 130;
+    return;
+  }
   if (error instanceof LiveConfigError) console.error(error.message);
   // An RPC or failed assertion may contain calldata/bundles. Never print the original error.
   else if (describeSafeCause(error)) console.error(describeSafeCause(error));
