@@ -14,7 +14,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import {
   acquireLiveRunLock,
   demoMode,
+  describeSafeCause,
   LIVE_CONFIRMATION,
+  LiveConfigError,
   readLiveConfig,
   repoRoot,
   requireLiveConfirmation,
@@ -86,11 +88,51 @@ afterEach(async () => {
 });
 
 describe("live demo safety gates and evidence", () => {
+  it("reports malformed RPC configuration without leaking the entered URL", () => {
+    for (const url of [
+      "",
+      "provider-secret-not-a-url",
+      "BASE_RPC_URL=https://example.invalid/private-key",
+      "http://example.invalid",
+    ]) {
+      try {
+        readLiveConfig({ ...env, BASE_RPC_URL: url });
+        throw new Error("Expected configuration rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LiveConfigError);
+        expect((error as Error).message).toBe(
+          "Live mode requires an HTTPS Base RPC",
+        );
+      }
+    }
+  });
+  it("names RPC rate limiting without leaking the provider URL", () => {
+    const secretUrl = "https://base.example.invalid/v2/provider-secret";
+    const rpc = Object.assign(new Error(`over rate limit ${secretUrl}`), {
+      code: -32016,
+    });
+    const wrapped = Object.assign(new Error(`call failed ${secretUrl}`), {
+      name: "ContractFunctionExecutionError",
+      cause: Object.assign(new Error(secretUrl), { cause: rpc }),
+    });
+    expect(describeSafeCause(wrapped)).toMatch(/rate-limiting/);
+    expect(describeSafeCause(wrapped)).not.toContain("provider-secret");
+    expect(
+      describeSafeCause(
+        Object.assign(new Error(secretUrl), { name: "TimeoutError" }),
+      ),
+    ).toBe("Cause (error type only): TimeoutError");
+  });
   it("blocks concurrent live invocations until the previous run is reconciled", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "nota-live-lock-"));
     dirs.push(root);
     const release = await acquireLiveRunLock(root);
-    await expect(acquireLiveRunLock(root)).rejects.toThrow();
+    await expect(acquireLiveRunLock(root)).rejects.toBeInstanceOf(
+      LiveConfigError,
+    );
+    await expect(acquireLiveRunLock(root)).rejects.toThrow(
+      "live-demo.lock exists",
+    );
     await release();
     const nextRelease = await acquireLiveRunLock(root);
     await nextRelease();

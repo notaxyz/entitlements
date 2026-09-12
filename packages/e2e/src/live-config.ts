@@ -53,7 +53,13 @@ export function readLiveConfig(env: NodeJS.ProcessEnv) {
   if (buyer === seller || buyer === relayer)
     throw new LiveConfigError("Buyer must differ from seller and relayer");
   const rpcUrl = env.BASE_RPC_URL;
-  if (!rpcUrl || new URL(rpcUrl).protocol !== "https:")
+  let validRpc = false;
+  try {
+    validRpc = Boolean(rpcUrl) && new URL(rpcUrl!).protocol === "https:";
+  } catch {
+    /* Never expose URL parser errors: the input can contain a provider key. */
+  }
+  if (!validRpc || !rpcUrl)
     throw new LiveConfigError("Live mode requires an HTTPS Base RPC");
   const amountText = env.LIVE_DEMO_USDC_AMOUNT;
   if (!amountText || !/^\d+(\.\d{1,6})?$/.test(amountText))
@@ -99,14 +105,41 @@ export async function acquireLiveRunLock(
   const directory = path.join(root, "private-data");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const lock = path.join(directory, "live-demo.lock");
-  await writeFile(
-    lock,
-    JSON.stringify({
-      startedAt: new Date().toISOString(),
-      pid: process.pid,
-      note: "Do not remove until any live transactions and evidence have been reconciled",
-    }) + "\n",
-    { flag: "wx", mode: 0o600 },
-  );
+  try {
+    await writeFile(
+      lock,
+      JSON.stringify({
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        note: "Do not remove until any live transactions and evidence have been reconciled",
+      }) + "\n",
+      { flag: "wx", mode: 0o600 },
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST")
+      throw new LiveConfigError(
+        "private-data/live-demo.lock exists from an earlier incomplete run. Reconcile its transactions (transactions.jsonl in that run's LIVE_DEMO_STATE_DIR, and the wallets on Basescan), then delete the lock and retry",
+      );
+    throw error;
+  }
   return () => unlink(lock);
+}
+
+/** Error class names only (e.g. viem's HttpRequestError); messages may contain RPC URLs or calldata. */
+function safeErrorName(error: unknown): string | undefined {
+  const name = error instanceof Error ? error.name : undefined;
+  return name && /^[A-Za-z]{1,64}$/.test(name) ? name : undefined;
+}
+
+/** Credential-free description of an unexpected error: known RPC conditions, else the error type. */
+export function describeSafeCause(error: unknown): string | undefined {
+  let cause: unknown = error;
+  for (let depth = 0; cause && depth < 10; depth++) {
+    const { status, code } = cause as { status?: unknown; code?: unknown };
+    if (status === 429 || code === 429 || code === -32016 || code === -32005)
+      return "BASE_RPC_URL is rate-limiting requests (HTTP 429 / over rate limit). Use a dedicated Base RPC; shared public endpoints throttle this flow";
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  const name = safeErrorName(error);
+  return name && `Cause (error type only): ${name}`;
 }

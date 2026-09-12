@@ -796,8 +796,14 @@ From the repository root, with the keys and RPC already configured:
 ```sh
 export LIVE_DEMO_USDC_AMOUNT=0.10
 export LIVE_DEMO_STATE_DIR="$PWD/private-data/base-live-demo-1"
+npm run demo:preflight          # read-only: no confirmation, lock, transactions or files
 npm run demo:connected -- --live
 ```
+
+`demo:preflight` runs the same chain, deployment, wallet and balance checks the live
+run performs before its first transaction, and names the failing check (for RPC
+failures, only the error type). The live run repeats these checks before the
+confirmation prompt.
 
 The amount is mandatory, accepts up to six decimals, and is capped at 10 USDC.
 The original fork catalog remains 10 USDC; the live demo uses the amount you select

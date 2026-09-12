@@ -13,6 +13,7 @@
     "redemption-server": "tsx packages/resource-server/src/redemption/server.ts",
     "demo:redemption": "tsx packages/resource-server/scripts/redemption-demo.ts",
     "demo:connected": "tsx packages/e2e/scripts/connected-demo.ts",
+    "demo:preflight": "tsx packages/e2e/scripts/live-preflight.ts",
     "subgraph:codegen": "npm run codegen --workspace @nota/subgraph",
     "subgraph:build": "npm run subgraph:codegen && npm run build --workspace @nota/subgraph",
     "subgraph:test": "npm run subgraph:codegen && npm run test --workspace @nota/subgraph",

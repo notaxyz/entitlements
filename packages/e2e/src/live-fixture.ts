@@ -29,6 +29,7 @@ import {
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Server } from "node:http";
@@ -40,7 +41,7 @@ import {
   verifyDeployments,
 } from "../../subgraph/checks/deployments.js";
 import { close, listen, reservePort, type Fixture } from "./fixture.js";
-import type { LiveConfig } from "./live-config.js";
+import { LiveConfigError, type LiveConfig } from "./live-config.js";
 
 // Verified against the deployed store ABI on Basescan, 2026-09-12.
 export const listingCreatedEvent = parseAbiItem(
@@ -55,32 +56,50 @@ export interface LiveFixture extends Fixture {
   stateDir: string;
 }
 
-/** Only call after the CLI has received explicit interactive confirmation. No deployments or funding tricks. */
-export async function startLiveFixture(
-  config: LiveConfig,
-  onTransaction: (kind: LiveTransactionKind, hash: Hex) => void,
-): Promise<LiveFixture> {
+/**
+ * Read-only checks shared by the live run and `demo:preflight`: sends no transactions, writes no files.
+ * Every failure is a fixed, credential-free LiveConfigError; RPC errors propagate unchanged.
+ */
+export async function preflightLive(config: LiveConfig) {
   const rpcUrl = config.rpcUrl;
   const chain = notaChain(8453, rpcUrl);
   const publicClient = createPublicClient({
     chain,
     transport: http(rpcUrl, { retryCount: 0, timeout: 20_000 }),
   });
+  if (existsSync(config.stateDir))
+    throw new LiveConfigError(
+      "LIVE_DEMO_STATE_DIR already exists; every live run needs a new directory",
+    );
   if ((await publicClient.getChainId()) !== 8453)
-    throw new Error("WRONG_CHAIN");
+    throw new LiveConfigError("BASE_RPC_URL is not a Base mainnet (8453) RPC");
   // The client trust configuration also pins these baseline addresses. Never silently mix deployments.
   if (
     !isAddressEqual(deployed.store, NOTA_RECEIPT_STORE) ||
     !isAddressEqual(deployed.registry, PURCHASE_REF_REGISTRY) ||
     !isAddressEqual(deployed.token, USDC)
   )
-    throw new Error("BASELINE_MANIFEST_MISMATCH");
-  await verifyDeployments(publicClient, await publicClient.getBlockNumber());
-  for (const address of [config.seller, config.buyer, config.relayer]) {
+    throw new LiveConfigError("BASELINE_MANIFEST_MISMATCH");
+  try {
+    await verifyDeployments(publicClient, await publicClient.getBlockNumber());
+  } catch (error) {
+    // verifyDeployments throws fixed codes (e.g. DEPLOYMENT_CODE_MISMATCH); anything else is an RPC error.
+    if (error instanceof Error && /^[A-Z_]+$/.test(error.message))
+      throw new LiveConfigError(
+        `Deployment verification failed: ${error.message}`,
+      );
+    throw error;
+  }
+  const roles = [
+    ["seller", config.seller],
+    ["buyer", config.buyer],
+    ["relayer", config.relayer],
+  ] as const;
+  for (const [role, address] of roles) {
     const code = await publicClient.getCode({ address });
     if (code && code !== "0x")
-      throw new Error(
-        "Demo signing wallets must have no code or EIP-7702 delegation",
+      throw new LiveConfigError(
+        `The ${role} wallet has contract code or an EIP-7702 delegation; use a plain EOA`,
       );
     const latest = await publicClient.getTransactionCount({
       address,
@@ -91,13 +110,16 @@ export async function startLiveFixture(
       blockTag: "pending",
     });
     if (latest !== pending)
-      throw new Error(
-        "Reconcile pending wallet transactions before running the demo",
+      throw new LiveConfigError(
+        `The ${role} wallet has pending transactions; wait for or reconcile them before running the demo`,
       );
   }
-  for (const address of new Set([config.seller, config.relayer])) {
+  for (const [role, address] of roles) {
+    if (role === "buyer") continue;
     if ((await publicClient.getBalance({ address })) === 0n)
-      throw new Error("Seller and relayer need real ETH for gas");
+      throw new LiveConfigError(
+        `The ${role} wallet has no Base ETH for gas`,
+      );
   }
   const usdcBalance = (address: Address) =>
     publicClient.readContract({
@@ -107,7 +129,9 @@ export async function startLiveFixture(
       args: [address],
     });
   if ((await usdcBalance(config.buyer)) < config.amount)
-    throw new Error("Buyer has insufficient real Base USDC");
+    throw new LiveConfigError(
+      "The buyer wallet holds less Base USDC than LIVE_DEMO_USDC_AMOUNT",
+    );
   if (
     await publicClient.readContract({
       address: deployed.store,
@@ -115,7 +139,17 @@ export async function startLiveFixture(
       functionName: "purchasesPaused",
     })
   )
-    throw new Error("STORE_PURCHASES_PAUSED");
+    throw new LiveConfigError("Nota store purchases are paused on-chain");
+  return { chain, publicClient, usdcBalance };
+}
+
+/** Only call after the CLI has received explicit interactive confirmation. No deployments or funding tricks. */
+export async function startLiveFixture(
+  config: LiveConfig,
+  onTransaction: (kind: LiveTransactionKind, hash: Hex) => void,
+): Promise<LiveFixture> {
+  const rpcUrl = config.rpcUrl;
+  const { chain, publicClient, usdcBalance } = await preflightLive(config);
 
   // Never reuse a prior live run's directory. Preserve it on success AND failure for reconciliation.
   await mkdir(path.dirname(config.stateDir), { recursive: true, mode: 0o700 });

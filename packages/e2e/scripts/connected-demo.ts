@@ -12,8 +12,9 @@ import {
   readLiveConfig,
   repoRoot,
   requireLiveConfirmation,
+  describeSafeCause,
 } from "../src/live-config.js";
-import { startLiveFixture } from "../src/live-fixture.js";
+import { preflightLive, startLiveFixture } from "../src/live-fixture.js";
 import {
   collectLiveEvidence,
   recordLiveEvidence,
@@ -49,7 +50,9 @@ async function main() {
 
 async function runLive() {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
-    throw new Error("Interactive terminal required");
+    throw new LiveConfigError(
+      "Interactive terminal required; run directly, without a pipe or output redirection",
+    );
   const config = readLiveConfig(process.env);
   const manifests = await Promise.all(
     ["base.json", "subgraph-base.json"].map(async (name) =>
@@ -57,9 +60,17 @@ async function runLive() {
         await readFile(path.join(repoRoot, "deployments", name), "utf8"),
       ),
     ),
-  );
+  ).catch(() => {
+    throw new LiveConfigError(
+      "Cannot read deployments/base.json or deployments/subgraph-base.json; check that both files exist and contain valid JSON",
+    );
+  });
   if (manifests.some((m) => m.publicDemo))
-    throw new Error("Demo already recorded; review before another paid run");
+    throw new LiveConfigError(
+      "Demo already recorded; review before another paid run",
+    );
+  // Read-only: surface configuration, balance and RPC problems before confirmation and the run lock.
+  await preflightLive(config);
   console.info(
     JSON.stringify({
       mode: "BASE MAINNET — REAL FUNDS",
@@ -140,6 +151,7 @@ async function runLive() {
 main().catch((error) => {
   if (error instanceof LiveConfigError) console.error(error.message);
   // An RPC or failed assertion may contain calldata/bundles. Never print the original error.
+  else if (describeSafeCause(error)) console.error(describeSafeCause(error));
   console.error(
     "Connected demo failed or was cancelled; no completion claim. Check configuration, funds, RPC and private recovery files. Reconcile submitted hashes before retrying a live purchase. Keys, bundles and provider details suppressed.",
   );
