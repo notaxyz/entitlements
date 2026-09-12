@@ -65,6 +65,9 @@ const KEYS = {
 const USDC_BALANCE_SLOT = 9n;
 
 export interface Fixture {
+  mode?: "fork" | "live";
+  paymentAmount?: bigint;
+  persistBuyerBundle?: (bundle: { rawPurchaseRef: string; purchaseRefNonce: Hex }) => Promise<void>;
   rpcUrl: string;
   chainId: number;
   adapter: Address;
@@ -119,7 +122,7 @@ async function waitForRpc(url: string, child: ChildProcess, timeoutMs = 45_000):
   throw new Error(`anvil did not become ready at ${url}`);
 }
 
-function listen(app: Express, port = 0): Promise<{ url: string; server: Server }> {
+export function listen(app: Express, port = 0): Promise<{ url: string; server: Server }> {
   return new Promise((resolve, reject) => {
     const server = createServer(app).listen(port, "127.0.0.1", () => {
       const address = server.address();
@@ -134,7 +137,7 @@ function listen(app: Express, port = 0): Promise<{ url: string; server: Server }
 
 /// The resource server signs its own URL into the metadata document, so it has to know its port
 /// before it starts. Reserve one, release it, and bind it.
-function reservePort(): Promise<number> {
+export function reservePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer().listen(0, "127.0.0.1", () => {
       const address = probe.address();
@@ -148,7 +151,7 @@ function reservePort(): Promise<number> {
   });
 }
 
-function close(server: Server): Promise<void> {
+export function close(server: Server): Promise<void> {
   return new Promise((resolve) => {
     // fetch keeps connections alive, and server.close() waits for them. Without this a restart
     // hangs until the agent's idle sockets time out.

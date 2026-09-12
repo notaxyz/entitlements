@@ -21,6 +21,9 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 export interface FacilitatorConfig {
+  confirmations?: number;
+  /** Public hash only; called immediately after a successful broadcast response. */
+  onTransactionSubmitted?: (hash: Hex) => void;
   rpcUrl: string;
   chainId: number;
   /// Key that pays the gas. The buyer never sends a transaction and needs no ETH.
@@ -74,7 +77,7 @@ export function createFacilitator(config: FacilitatorConfig): Express {
 
       response.status(502).json({
         error: "settlement failed",
-        detail: error instanceof Error ? error.message : String(error),
+        detail: "Provider details suppressed; reconcile any submitted transaction before retrying",
       });
     }
   });
@@ -144,7 +147,8 @@ export function createFacilitator(config: FacilitatorConfig): Express {
     });
 
     const txHash = await walletClient.writeContract(simulated);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+    config.onTransactionSubmitted?.(txHash);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: config.confirmations ?? 1 });
 
     if (receipt.status !== "success") {
       throw new Error(`settlement transaction ${txHash} reverted`);

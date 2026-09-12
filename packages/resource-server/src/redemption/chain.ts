@@ -99,6 +99,8 @@ export function decodeSettlements(
 }
 
 export interface ViemRedemptionConfig {
+  /** Public hash only; never pass calldata or a preimage bundle to a logger. */
+  onTransactionSubmitted?: (hash: Hex) => void;
   rpcUrl: string;
   store: Address;
   redemption: Address;
@@ -355,6 +357,7 @@ export class ViemRedemptionChain implements RedemptionChain {
     let receipt;
     try {
       hash = await this.walletClient.writeContract(request);
+      this.config.onTransactionSubmitted?.(hash);
       receipt = await this.publicClient.waitForTransactionReceipt({
         hash,
         confirmations: this.confirmations,

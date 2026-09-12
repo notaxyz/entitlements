@@ -770,6 +770,71 @@ The same runner is exercised by `packages/e2e/test/connected-flow.test.ts`. That
 integration test skips without `BASE_RPC_URL`; deterministic backend and local-EVM
 tests continue to run without an external RPC. Scripts do not automatically load `.env`.
 
+### Connected demo on deployed Base mainnet contracts
+
+**Real spending, opt-in only.** The default `npm run demo:connected` remains fork-only.
+`npm run demo:connected -- --live` reads the adapter/redemption addresses from
+[`deployments/base.json`](./deployments/base.json); it never deploys replacements,
+impersonates accounts, or fabricates balances. It runs the same HTTP flow above,
+including the attacker attempt **before** the successful redemption so the rejection
+demonstrates buyer binding, not merely replay protection. Authentication remains
+**mock-wallet**, not World human verification.
+
+Required environment: `BASE_RPC_URL` (HTTPS, with historical receipt/state access),
+`SELLER_PRIVATE_KEY`, `BUYER_PRIVATE_KEY`, `LIVE_DEMO_USDC_AMOUNT` and
+`LIVE_DEMO_STATE_DIR`. Optional `RELAYER_PRIVATE_KEY` defaults to the seller key.
+A dedicated RPC is recommended: shared public endpoints can throttle this multi-step
+flow. The runner does not blindly resubmit payments after a provider failure.
+Seller/relayer need real Base ETH for gas; the distinct buyer needs real Base USDC.
+The buyer signs EIP-3009 and access/redemption challenges, but sends no transaction.
+Use dedicated, non-delegated EOA wallets and do not send other wallet transactions
+while the demo runs. Keys must already be available in the process environment;
+never paste them into command history or commit them.
+
+From the repository root, with the keys and RPC already configured:
+
+```sh
+export LIVE_DEMO_USDC_AMOUNT=0.10
+export LIVE_DEMO_STATE_DIR="$PWD/private-data/base-live-demo-1"
+npm run demo:connected -- --live
+```
+
+The amount is mandatory, accepts up to six decimals, and is capped at 10 USDC.
+The original fork catalog remains 10 USDC; the live demo uses the amount you select
+and labels its report as illustrative content. Inspect the displayed wallet addresses,
+deployed contracts and amount, then type **`SPEND ON BASE`** at the interactive prompt.
+Piped confirmation, non-interactive execution, unknown flags and `--yes` are refused.
+Gas is additional and variable. Cancellation happens before any live-chain write.
+
+The runner checks chain ID, recorded contract bytecode/wiring, registry authorization,
+wallet code, pending transactions and balances before listing creation. It derives
+the listing ID from the confirmed `ListingCreated` event rather than a racy global
+counter. Successful broadcasts print the transaction hash and a `basescan.org/tx/`
+URL immediately; receipts require two confirmations. Unlike a fork, advancing block
+height during attacker/replay attempts is normal; sender transaction counts and
+redemption state still enforce the no-extra-transaction assertions.
+
+**Recovery:** the new private directory is retained, not deleted at exit. It contains
+owner-only issued orders, the buyer's original preimage bundle, listing details and
+a public transaction journal. Do not share it or record its contents in the video.
+Never blindly retry after a send timeout or partial failure: reconcile printed hashes
+first. A new run creates a new listing/purchase; it is not a resume command. The
+runner refuses an existing state directory or replacement of an already recorded demo.
+A `private-data/live-demo.lock` prevents concurrent runs and remains after an incomplete
+run. It is removed automatically only after successful evidence recording; reconcile
+the previous run before manually removing a retained lock, even if startup failed.
+
+Only after all three scenarios and the confirmed event/receipt checks pass does it
+save `public-evidence.json` in that directory and add a `publicDemo` record to **both**
+deployment manifests, setting `scope.newPublicPurchaseAndRedemptionDemoRecorded`
+to `true`. Those edits are local and uncommitted. Prior Graph verification counts
+and World status remain unchanged: verify these new events in Studio separately.
+Manifest replacement is atomic per file, not across both files; if recording fails,
+use the saved public evidence to reconcile the files, **not another payment**.
+
+No live purchase was executed merely by adding this mode. Its mainnet evidence flags
+remain false until a successful operator-confirmed run.
+
 ### Redemption backend demo
 
 With Node.js 20+, Foundry/Anvil, and initialized submodules:

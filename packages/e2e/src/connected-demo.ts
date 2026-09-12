@@ -52,7 +52,8 @@ export async function runConnectedDemo(
     address: f.buyer,
   });
   const buyerTokensBefore = await f.usdcBalance(f.buyer);
-  assert.equal(buyerEthBefore, 0n, "The demo buyer must start without ETH");
+  const adapterTokensBefore = await f.usdcBalance(f.adapter);
+  if (f.mode !== "live") assert.equal(buyerEthBefore, 0n, "The fork demo buyer must start without ETH");
 
   const tracedFetch: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -78,6 +79,8 @@ export async function runConnectedDemo(
         isAddressEqual(extension.quote.buyer, f.buyer),
         "Quote must bind buyer A",
       );
+      assert.equal(BigInt(extension.quote.listingId), f.listingId);
+      assert.equal(BigInt(extension.quote.amount), f.paymentAmount ?? 10_000_000n, "Quote must match the explicitly selected amount before signing");
       purchaseRef = extension.quote.purchaseRef;
       report({ stage: "payment.required", status: 402, purchaseRef });
     }
@@ -113,12 +116,13 @@ export async function runConnectedDemo(
     rpcUrl: f.rpcUrl,
     chainId: f.chainId,
     privateKey: f.buyerPrivateKey,
-    maxAmount: 10_000_000n,
+    maxAmount: f.paymentAmount ?? 10_000_000n,
     trusted: baseDeployment([f.adapter]),
     logger: { info: () => {}, warn: () => {} },
     fetchImpl: tracedFetch,
     onBundleCreated: async (bundle: Readonly<RedemptionBundle>) => {
       buyerBundle = { ...bundle };
+      await f.persistBuyerBundle?.(buyerBundle);
     },
   };
   const paid = await payAndFetch<{ report: string }>(f.resourceUrl, agent);
@@ -156,7 +160,7 @@ export async function runConnectedDemo(
     await f.usdcBalance(f.buyer),
     buyerTokensBefore - BigInt(paid.receipt.amount),
   );
-  assert.equal(await f.usdcBalance(f.adapter), 0n);
+  assert.equal(await f.usdcBalance(f.adapter), adapterTokensBefore);
   assert(
     isAddressEqual(await f.redemptionChain.consumedBy(purchaseRef!), f.adapter),
   );
@@ -215,7 +219,7 @@ export async function runConnectedDemo(
     await f.publicClient.getTransactionCount({ address: f.seller }),
     sellerNonceBefore,
   );
-  assert.equal(
+  if (f.mode !== "live") assert.equal(
     await f.publicClient.getBlockNumber({ cacheTime: 0 }),
     blockBefore,
   );
@@ -277,7 +281,7 @@ export async function runConnectedDemo(
     await f.publicClient.getTransactionCount({ address: f.seller }),
     sellerNonceBefore + 1,
   );
-  assert.equal(
+  if (f.mode !== "live") assert.equal(
     await f.publicClient.getBlockNumber({ cacheTime: 0 }),
     blockAfter,
   );

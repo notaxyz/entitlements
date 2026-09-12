@@ -35,10 +35,11 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { randomBytes } from "node:crypto";
 
-import { CATALOG } from "./catalog.js";
+import { CATALOG, type CatalogEntry } from "./catalog.js";
 import { memoryQuoteStore, type QuoteStore } from "./store.js";
 
 export interface ResourceServerConfig {
+  catalog?: Readonly<Record<string, CatalogEntry>>;
   rpcUrl: string;
   chainId: number;
   store: Address;
@@ -63,6 +64,7 @@ export interface ResourceServerConfig {
 }
 
 export function createResourceServer(config: ResourceServerConfig): Express {
+  const catalog = config.catalog ?? CATALOG;
   const chain = notaChain(config.chainId, config.rpcUrl);
   const seller = privateKeyToAccount(config.sellerPrivateKey);
   const publicClient = createPublicClient({ chain, transport: http(config.rpcUrl) });
@@ -119,7 +121,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
   app.route("/reports/:id").get(safe(serveReport)).post(safe(serveReport));
 
   async function serveReport(request: Request, response: Response): Promise<void> {
-    const entry = CATALOG[request.params.id ?? ""];
+    const entry = catalog[request.params.id ?? ""];
 
     if (!entry) {
       response.status(404).json({ error: "no such report" });
@@ -195,7 +197,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
     catalogId: string,
     buyerBundle?: { rawPurchaseRef: string; purchaseRefNonce: Hex },
   ): Promise<PaymentRequiredResponse> {
-    const entry = CATALOG[catalogId]!;
+    const entry = catalog[catalogId]!;
 
     // POST checkout supplies buyer-generated entropy; legacy GET generates it here. The raw
     // reference is not necessarily secret; purchaseRefNonce makes purchaseRef unguessable.
@@ -435,7 +437,7 @@ export function createResourceServer(config: ResourceServerConfig): Express {
       return;
     }
 
-    const entry = CATALOG[record.catalogId]!;
+    const entry = catalog[record.catalogId]!;
 
     response.json({
       resource: record.resource,

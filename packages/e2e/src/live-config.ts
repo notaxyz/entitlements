@@ -1,0 +1,112 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { privateKeyToAccount } from "viem/accounts";
+import { parseUnits, type Hex } from "viem";
+import deployment from "../../../deployments/base.json";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
+
+export const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
+export const LIVE_CONFIRMATION = "SPEND ON BASE";
+
+/** Only controlled, credential-free configuration messages may be printed by the CLI. */
+export class LiveConfigError extends Error {}
+
+export function demoMode(args: string[]): "fork" | "live" {
+  if (args.length === 0) return "fork";
+  if (args.length === 1 && args[0] === "--live") return "live";
+  throw new LiveConfigError(
+    "Use no flags for a fork, or --live for Base mainnet",
+  );
+}
+
+export function requireLiveConfirmation(
+  answer: string,
+  interactive: boolean,
+): void {
+  if (!interactive || answer !== LIVE_CONFIRMATION)
+    throw new LiveConfigError("LIVE_CONFIRMATION_REQUIRED");
+}
+
+export function readLiveConfig(env: NodeJS.ProcessEnv) {
+  function key(name: string): Hex {
+    const value = env[name];
+    if (!value || !/^0x[0-9a-fA-F]{64}$/.test(value))
+      throw new LiveConfigError(`Missing or invalid ${name}`);
+    try {
+      privateKeyToAccount(value as Hex);
+    } catch {
+      throw new LiveConfigError(`Invalid ${name}`);
+    }
+    return value as Hex;
+  }
+  const sellerKey = key("SELLER_PRIVATE_KEY");
+  const buyerKey = key("BUYER_PRIVATE_KEY");
+  const relayerKey = env.RELAYER_PRIVATE_KEY
+    ? key("RELAYER_PRIVATE_KEY")
+    : sellerKey;
+  const seller = privateKeyToAccount(sellerKey).address;
+  const buyer = privateKeyToAccount(buyerKey).address;
+  const relayer = privateKeyToAccount(relayerKey).address;
+  if (buyer === seller || buyer === relayer)
+    throw new LiveConfigError("Buyer must differ from seller and relayer");
+  const rpcUrl = env.BASE_RPC_URL;
+  if (!rpcUrl || new URL(rpcUrl).protocol !== "https:")
+    throw new LiveConfigError("Live mode requires an HTTPS Base RPC");
+  const amountText = env.LIVE_DEMO_USDC_AMOUNT;
+  if (!amountText || !/^\d+(\.\d{1,6})?$/.test(amountText))
+    throw new LiveConfigError(
+      "Set LIVE_DEMO_USDC_AMOUNT, with at most six decimals",
+    );
+  const amount = parseUnits(amountText, 6);
+  if (amount <= 0n || amount > 10_000_000n)
+    throw new LiveConfigError(
+      "Live demo amount must be greater than zero and at most 10 USDC",
+    );
+  const stateDir = env.LIVE_DEMO_STATE_DIR;
+  const privateRoot = path.join(repoRoot, "private-data");
+  if (
+    !stateDir ||
+    !path.isAbsolute(stateDir) ||
+    !path.resolve(stateDir).startsWith(privateRoot + path.sep)
+  )
+    throw new LiveConfigError(
+      "LIVE_DEMO_STATE_DIR must be a new absolute directory inside this repo's private-data directory",
+    );
+  if (deployment.chainId !== 8453 || deployment.network !== "base")
+    throw new LiveConfigError("Deployment manifest must target Base mainnet");
+  return {
+    rpcUrl,
+    sellerKey,
+    buyerKey,
+    relayerKey,
+    seller,
+    buyer,
+    relayer,
+    amount,
+    stateDir: path.resolve(stateDir),
+  };
+}
+
+export type LiveConfig = ReturnType<typeof readLiveConfig>;
+
+/** Fail closed across concurrent invocations and partial runs; release only after full success. */
+export async function acquireLiveRunLock(
+  root = repoRoot,
+): Promise<() => Promise<void>> {
+  const directory = path.join(root, "private-data");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lock = path.join(directory, "live-demo.lock");
+  await writeFile(
+    lock,
+    JSON.stringify({
+      startedAt: new Date().toISOString(),
+      pid: process.pid,
+      note: "Do not remove until any live transactions and evidence have been reconciled",
+    }) + "\n",
+    { flag: "wx", mode: 0o600 },
+  );
+  return () => unlink(lock);
+}
