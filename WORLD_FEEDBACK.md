@@ -50,6 +50,18 @@ No wallet private keys, World ID proofs, or redemption preimage bundles belong h
 The 2026-09-09 discovery status above is historical. On 2026-09-10 the project owner
 explicitly authorized building against mock authentication without waiting for registration.
 
+**Status, 2026-09-13:** the connected fork demo and separately recorded
+0.10-USDC mainnet purchase/redemption now exist, with Studio event checks in both
+deployment manifests. Those are payment/redemption evidence, not World integration.
+`WorldAgentKitAuthorizer`, AgentBook resolution and World Sandbox verification remain
+unfinished in source. No registration result or sponsor response has been recorded.
+The dated discovery observations below remain historical.
+
+The [current official AgentKit Continuity requirements](https://ethglobal.com/events/ethonline2026/prizes/world)
+(checked 2026-09-13) include meaningful AgentKit use, a working app, AgentBook where
+relevant, Sandbox App testing, and feedback on docs, portal and sandbox experience.
+This feedback record does not substitute for those missing implementation/test results.
+
 ## 2026-09-10 — mock-backed implementation
 
 - Implemented the `AgentAuthorizer` seam, `MockAgentAuthorizer`, and a separate

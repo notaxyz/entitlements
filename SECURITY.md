@@ -25,13 +25,13 @@ The set is fixed at construction, so this contract keeps its no-owner property a
 
 The purchase-reference preimage includes the seller, so a purchase reference is globally unique. Redemption state is therefore keyed directly by `purchaseRef`.
 
-`listingId` is used when resolving and validating the seller but is not independently committed into `purchaseRef`. For that reason, `EntitlementRedeemed` does not emit a listing ID. Consumers must join it to the original `ReceiptPurchasedV2` event by `purchaseRef` when they need the authoritative listing.
+`listingId` is used when resolving and validating the seller but is not independently committed into `purchaseRef`. For that reason, `EntitlementRedeemed` does not emit a listing ID. Consumers must join by `purchaseRef` to either `ReceiptPurchasedV2` from the trusted store or `X402ReceiptSettled` from a trusted adapter for the authoritative listing. Adapter settlement does not also emit the store event; receipt IDs are module-local, not join keys.
 
 ### What the contract does not guarantee
 
 The contract does not identify or authenticate the buyer or purchasing agent. Possession of the raw purchase reference and nonce does not establish an agent identity on-chain, and the contract has no record of which agent should receive the entitlement.
 
-In particular, the policy **“a stolen receipt is not enough” is not enforced by this contract**. It is a merchant-side authorization rule implemented by the Day 4 redemption endpoint. Its current mock authorizer proves control of the settlement buyer's EOA wallet, not human backing. A World/AgentBook authorizer is not yet implemented or live-verified. A seller who bypasses this endpoint can still redeem directly.
+In particular, the policy **“a stolen receipt is not enough” is not enforced by this contract**. It is a merchant-side authorization rule implemented by the redemption endpoint. Its current mock authorizer proves control of the settlement buyer's EOA wallet, not human backing. A World/AgentBook authorizer is not yet implemented or live-verified. A seller who bypasses this endpoint can still redeem directly.
 
 The contract also does not validate off-chain fulfillment, inspect receipt metadata, or require that a listing remains active after purchase.
 
@@ -41,7 +41,20 @@ The raw purchase reference is not necessarily secret. The `purchaseRefNonce` pro
 
 Seller authorization prevents another address from redeeming directly, but it does not replace merchant-side agent authentication or seller-key security.
 
-### Day 4 redemption endpoint
+The current client generates the original bundle before checkout, POSTs it privately
+with `X-PAYER`, and verifies the seller quote commits to that bundle before payment.
+The merchant stores a copy; authenticated access can recover it. The merchant and
+configured RPC see the preimage before it becomes public in redemption calldata.
+Only legacy GET checkout generates the bundle at the merchant. No bundle is present
+in the public 402, settlement request or settlement calldata.
+
+Content access is separate: the illustrative report is delivered before redemption
+and may be re-fetched after a fresh access challenge. Redemption is not one-time
+download enforcement or proof of fulfillment. A fresh signed redemption retry is
+rejected by the endpoint using `redeemedAt` (409, step 5), without broadcasting a
+second transaction; this must not be described as an observed on-chain revert.
+
+### Redemption endpoint
 
 `POST /v1/redemptions` depends on the `AgentAuthorizer` interface, independently of
 settlement verification and seller transaction submission. The delivered

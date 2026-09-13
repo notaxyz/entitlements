@@ -1,21 +1,39 @@
 # Nota Entitlements
 
-Nota binds an on-chain payment to what was purchased. This repository adds a way to
-pay a Nota quote without the buyer holding ETH, and to redeem the resulting
-entitlement once through a seller-authorized transaction.
+**For developers building purchasing agents and merchants selling paid API resources.**
+A payment proves money moved; it does not, by itself, bind the requester's identity
+to what was bought or prevent repeated redemption.
 
-**On-chain security property:** redemption requires a reference consumed by an accepted
-Nota settlement module, can happen once **per redemption deployment**, and must be
-submitted by the listing seller. The contract does not authenticate the buyer.
+Our concrete demo buys an **illustrative Base USDC flows report**: the agent checks
+itemized terms, authorizes USDC payment without sending a transaction, authenticates
+for paid access, and requests one seller-submitted redemption. During the event we
+built the EIP-3009 settlement adapter, entitlement contract, buyer-authenticated
+backend, restart recovery, connected demo, and Graph event index over the
+[pre-existing Nota protocol](./BASELINE.md).
 
-The [redemption endpoint](./packages/resource-server/REDEMPTION.md) enforces the
-separate merchant-side policy: the authenticated wallet must equal the settlement
-buyer before the seller submits redemption. Current authentication uses genuine
-wallet signatures in explicitly labelled mock mode. **World registration and
-AgentBook verification are not implemented or verified.**
+**Three outcomes:** B's stolen bundle is rejected; buyer A redeems successfully;
+A's fresh signed retry is rejected without another transaction.
+
+- **Watch:** demo video URL not yet supplied.
+- **Run:** [Git-checkout quickstart](#quickstart) and [interactive story mode](#recording-with-story-mode).
+- **Public proof:** [0.10-USDC mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e),
+  [redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194),
+  [Studio](https://thegraph.com/studio/subgraph/nota-entitlements), and
+  [recorded evidence](./deployments/base.json).
+- **Provenance:** [baseline](./BASELINE.md), [event contribution history](#event-contributions-and-source-snapshot),
+  and [AI assistance / available prompts](./documentation/AI_USAGE.md).
+
+**Boundaries:** genuine EOA signatures in `mock-wallet` mode, `humanVerified=false`;
+not World/AgentBook verification. The buyer is a programmatic client, not demonstrated
+LLM reasoning. The report is delivered **before redemption**, is not live Graph
+analytics, and is not a one-time download. Buyer matching is merchant-endpoint policy;
+the seller can bypass it. On-chain replay protection is **per redemption deployment**.
+No fulfillment or sponsor-qualification claim is made.
 
 ## Contents
 
+- [Quickstart](#quickstart)
+- [Demo outcomes](#demo-outcomes-and-enforcement)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Contract responsibilities](#contract-responsibilities)
 - [Continuity boundary](#continuity-boundary)
@@ -29,6 +47,78 @@ AgentBook verification are not implemented or verified.**
 - [Trust boundaries and limitations](#trust-boundaries-and-limitations)
 - [Development](#development)
 - [World integration status](#world-integration-status)
+
+## Quickstart
+
+Use **Node.js 22** (workspace minimum **20.19**), npm, Git, and **Foundry 1.8.1**
+including Forge and Anvil, matching [CI](./.github/workflows/test.yml).
+From a new directory:
+
+```sh
+git clone --recurse-submodules https://github.com/notaxyz/entitlements.git
+cd entitlements
+git submodule update --init --recursive
+npm ci
+forge build
+npm run typecheck
+npm test
+```
+
+The recorded Git submodules are forge-std
+`886b4f8b63409ef474542de6394d25a9b5908ed3` and OpenZeppelin Contracts v5.1.0
+`69c8def5f222ff96f2b5beff05dfba996368aa79`
+([.gitmodules](./.gitmodules), [foundry.lock](./foundry.lock)).
+Do not substitute latest dependency revisions.
+
+**Plain ZIP:** source archives omit submodule contents and project Git history.
+`npm ci` alone does not populate Solidity dependencies. Prefer a fresh Git clone
+above, outside your extracted directory, rather than initializing an unrelated Git
+history or guessing dependency versions. An archive is not Continuity history evidence.
+
+**Repeatable connected demo:** configure a trusted Base RPC in your shell/secret
+manager, then export it. TypeScript scripts do **not** load `.env` automatically.
+Do not put credential-bearing URLs, keys or bundles in command history or recordings.
+
+```sh
+# BASE_RPC_URL must already hold your configured endpoint.
+export BASE_RPC_URL
+npm run demo:connected -- --story
+```
+
+This starts a disposable Base fork and local services; no live keys or funds are
+needed. The fork buyer pays **10 test USDC** and sends no transaction. Six Enter
+pauses require a TTY. Without `--story`, output is automatic JSON. Act 6 switches
+explicitly to a **different, recorded 0.10-USDC mainnet purchase** and prints (but
+does not execute) its Graph query.
+
+Without Base RPC, `npm test` runs deterministic/local-EVM tests and skips only the
+Base-fork suites. `npm run demo:redemption` is an automatic standalone local-mock
+redemption demo: no Base RPC, no story flag, no connected checkout or restart recovery.
+See [manual-service configuration](./packages/README.md#manual-service-configuration)
+for the different server environment variables.
+
+## Demo outcomes and enforcement
+
+These are sequential redemption attempts after one paid purchase, not three purchases.
+
+| Attempt | Enforcing component | HTTP | Code | Policy step | Additional redemption transactions |
+| --- | --- | --- | --- | --- | --- |
+| B signs with B's wallet and presents A's exact bundle while unredeemed | Merchant endpoint compares authenticated wallet with settlement buyer | 403 | `BUYER_MISMATCH` | 6 | 0 |
+| A signs and presents its bundle | Endpoint verifies order/buyer; contract checks seller, accepted consumer and replay | 201 | `REDEEMED` | 7 (submission/confirmation) | 1, sent by seller; `EntitlementRedeemed` verified |
+| A retries with a fresh signed challenge | Endpoint reads on-chain `redeemedAt` before submission | 409 | `ALREADY_REDEEMED` | 5 | 0 |
+
+The replay response is **not an on-chain reverted transaction**. A fresh challenge
+ensures the request reaches the redemption-state check rather than merely failing
+authentication. B goes first to exercise buyer policy while redemption is still
+available. The table's step numbers refer to the endpoint's check sequence; success
+logs step 7. [Source assertions](./packages/e2e/src/connected-demo.ts) and the
+[local-EVM replay test](./packages/resource-server/test/redemption.anvil.test.ts)
+check the emitted event, seller nonce, and absence of extra transactions.
+
+Payment, authenticated content access, and redemption are distinct. The report is
+already served before the attacker/buyer/replay attempts. Re-fetch uses a new access
+challenge, not another payment or redemption. Redemption neither erases the delivered
+file nor proves that off-chain fulfillment occurred.
 
 ## Architecture at a glance
 
@@ -119,6 +209,30 @@ The receipt protocol predates ETHOnline 2026. Its baseline is [`notaxyz/contract
 
 [`BASELINE.md`](./BASELINE.md) records the timestamped boundary, deployed addresses, and the work introduced here. This repository does not vendor or modify Nota's existing contracts.
 
+### Event contributions and source snapshot
+
+History below comes from this repository's Git log. The last feature commit before
+the documentation restructure is [`14864c8`](https://github.com/notaxyz/entitlements/commit/14864c8a32c7aba5ccccf02fd385797a3e0a5ef5)
+(2026-09-13); story-mode HTTP route logging and the documentation restructure followed
+the same day. The commit named in the ETHGlobal submission is the submitted snapshot;
+it is not the older contract-deployment commit.
+
+| Git date | Contribution | Evidence commit(s) |
+| --- | --- | --- |
+| 2026-09-06 | Baseline record, Foundry scaffold, redemption, tests, trust boundaries, pinned CI formatter | `761f165`, `785c4c9`, `564fb57`, `51cf9ab`, `632244e`, `c3f772d` |
+| 2026-09-07–09 | EIP-3009 adapter, ERC-1271 buyers, accepted consumers, quote-bound nonce, client/facilitator/resource server, access authentication, trust checks, quote persistence | `e340f92`, `ac398fd`, `a4809ad`, `b55df07`, `8f3bbce`, `5df499a`, `ba1ca30`, `90e7f23`, `7105fe3`, `1d843d2`, `a3a6742` |
+| 2026-09-10 | Buyer-bound redemption endpoint, persistence/order checks, connected fork demo | `32ae8eb`, `12768cb`, `082b752`, `88e9b16` |
+| 2026-09-11 | Graph mappings and preflight preparation; buyer-generated checkout | `6febc41`, `8cc0b37`, `d618b3d` |
+| 2026-09-12 | Recorded Base deployments, Studio configuration/ABI fix/verification, live mode, preflight and public demo evidence | `8dae0e7`, `7c116cf`, `5e9d14b`, `5ddd34d`, `554da3d`, `5b60732`, `76eb742` |
+| 2026-09-13 | Six-act story presenter, cancellation handling and tests; story HTTP route logging; documentation restructure | `14864c8` and later commits |
+
+Inspect with `git log --reverse --stat` or `git show <commit>`. Dates are the
+commit-local dates Git records (the author's timezone varies between +0330, +0200
+and +0300), not independent proof of when every line was authored. The contract
+deployment record pins `d618b3d`; later live-demo and story work is **not** attributed
+to that older deployment commit. [BASELINE.md](./BASELINE.md) remains unchanged as
+historical evidence, distinct from this current contribution summary.
+
 ## Base mainnet dependencies
 
 | Contract | Address |
@@ -150,300 +264,38 @@ the adapter's USDC address, and redemption's fixed accepted set of **store + ada
 Both creation transactions match the local compiled artifacts plus the recorded
 constructor arguments. Source verification is not a security audit.
 
-This records deployment and authorization, **not yet a new public purchase/redemption
-demo, published subgraph, or World-verified agent flow**. Test fixtures still deploy
-fresh local instances; their addresses and transaction hashes are not public evidence.
+The deployment snapshot above predates the **2026-09-12 public purchase and redemption**.
+Both manifests now contain that demo and its Studio event-verification record. Studio
+publication is not decentralized-network publication; World verification is still absent.
+Test fixtures deploy local instances; their transactions are not public-chain evidence.
 
 ## x402 settlement adapter
 
-[`NotaX402Settlement`](./src/NotaX402Settlement.sol) settles a seller-signed Nota quote from a buyer's EIP-3009 `ReceiveWithAuthorization` instead of an `approve` + `transferFrom`. The buyer signs a payment authorization off-chain and never sends a transaction, so a facilitator can submit the settlement and the buyer needs no ETH.
-
-**On-chain security property:** settlement requires both a valid seller-authorized quote and a buyer authorization cryptographically bound to that exact quote, and consumes the quote's purchase reference exactly once.
-
-### Constructor and entry point
-
-```solidity
-constructor(address storeAddress)
-
-settleWithAuthorization(
-    SignedReceiptQuote quote,
-    bytes sellerSignature,
-    address claimedSigner,
-    ReceiveAuthorization authorization,
-    bytes buyerSignature,
-    bytes32 paymentSalt
-) returns (uint256 receiptId)
-```
-
-The constructor keeps `STORE`, `PURCHASE_REF_REGISTRY`, and `SETTLEMENT_TOKEN`
-immutable. The seller signs the commercial quote; the buyer signs the token
-authorization. Any submitter can relay them. The facilitator pays gas but does not
-gain authority to change the purchase. `ReentrancyGuard` and `SafeERC20` protect the
-adapter's execution path.
-
-### Settlement call sequence
-
-Here, **Adapter** is `NotaX402Settlement`, **Receipt store** is `NotaReceiptStore`,
-and **Registry** is `PurchaseRefRegistry`. The buyer has already checked the quote
-and supplied its payment authorization to the facilitator.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant F as Facilitator
-    participant X as Adapter
-    participant N as Receipt store
-    participant U as USDC
-    participant R as Registry
-
-    Note over F,X: Buyer supplies quote and signatures off-chain
-    F->>X: settleWithAuthorization<br/>(facilitator pays gas)
-    X->>N: purchasesPaused<br/>validateSignedReceiptPurchase
-    N-->>X: Seller, gross amount,<br/>fees and recipients
-    X->>N: hashSignedReceiptQuote
-    N-->>X: Canonical quote digest
-    X->>X: Check authorization<br/>and accounting
-    X->>U: receiveWithAuthorization
-    U-->>X: Verify buyer signature<br/>Transfer buyer funds to adapter
-    X->>R: consume(purchaseRef)
-    R-->>X: Consumption attributed to adapter
-    X->>X: Allocate adapter receipt ID
-    X->>U: Pay seller net + nonzero fees
-    X-->>F: X402ReceiptSettled + receiptId
-```
-
-All on-chain steps inside the adapter transaction are atomic. If quote validation,
-payment, registry consumption, or payout fails, the whole transaction reverts.
-Payment is pulled before consumption; consumption happens before distribution.
-
-### Payment authorization and accounting
-
-Matching payer, amount, and adapter alone is insufficient: different sellers'
-quotes can share all three. The buyer's authorization nonce therefore commits to
-the full quote digest:
-
-```text
-quoteDigest = STORE.hashSignedReceiptQuote(quote)
-authorization.nonce = keccak256(abi.encode(
-    AUTHORIZATION_NONCE_DOMAIN, quoteDigest, paymentSalt
-))
-```
-
-The adapter re-derives the nonce before spending. The digest includes the seller,
-listing, purchase reference, amount, and other signed terms, so an observed payment
-authorization cannot be lifted onto another quote for the same price.
-
-It also checks `authorization.from == quote.buyer`, `authorization.to == adapter`,
-and `authorization.value == quote.amount`. The store supplies the payout breakdown;
-the adapter does not reproduce the fee math. It checks:
-
-```text
-quote.amount == grossAmount == protocolFee + integratorFee + sellerNet
-```
-
-Successful settlement distributes those amounts. Zero-value fee legs are skipped,
-so a zero protocol fee with a zero recipient does not trigger a transfer.
-
-Three other boundaries matter:
-
-- **Bound buyer:** the adapter rejects `quote.buyer == address(0)`, even though the
-  store supports optional unbound quotes on its own purchase path.
-- **Upstream pause:** it checks `purchasesPaused()` separately because the store's
-  validation view does not enforce that switch.
-- **Recipient-only execution:** it calls `receiveWithAuthorization`, never
-  `transferWithAuthorization`. The token requires `msg.sender == to`, preventing
-  an observer from executing the buyer's authorization standalone. The token's
-  `bytes` overload supports EOA and ERC-1271 buyer signatures; that does not imply
-  smart-wallet support in the mock redemption authorizer.
-
-### Adapter receipt ids are not store receipt ids
-
-`X402ReceiptSettled.receiptId` comes from `nextAdapterReceiptId`, a counter local to this contract. It is unrelated to `NotaReceiptStore.nextReceiptId`, and a settlement through the adapter does not advance the store's counter. Adapter receipt `7` and store receipt `7` are different records in different id spaces. The only identifier that joins the two systems is `purchaseRef`; index on that, never on the id.
-
-The adapter also does not emit `ReceiptPurchasedV2`. That event belongs to the store and cannot be emitted from here, which is why `X402ReceiptSettled` carries `listingId` itself — `purchaseRef` does not commit to a listing, so without it a settlement could not be attributed to one from its own event.
-
-That is a deliberate asymmetry with `EntitlementRedeemed`, which omits the listing id. The difference is what a signature covers: `listingId` is inside the seller-signed quote, so the adapter emits an attested fact, whereas redemption has no signature over a listing id and a seller could emit any listing they liked. Same field, opposite correct answer — neither event should be changed to match the other.
+The adapter validates seller quotes through the existing store, binds the buyer's
+EIP-3009 authorization to that exact quote, consumes the reference in the registry,
+and distributes USDC atomically. The facilitator sends the transaction and pays gas.
+See [call sequence, accounting and signature boundaries](./documentation/ARCHITECTURE.md#x402-settlement-adapter).
 
 ## Entitlement redemption
 
-### Constructor, state, and checks
-
-```solidity
-constructor(address storeAddress, address[] additionalConsumers)
-
-redeemEntitlement(
-    uint256 listingId,
-    string rawPurchaseRef,
-    bytes32 purchaseRefNonce
-) returns (bytes32 purchaseRef)
-```
-
-The constructor discovers the registry from the store. It accepts the store itself
-plus the explicitly supplied settlement modules. Zero and duplicate consumers are
-rejected. The set is fixed for that deployment and can be inspected through
-`acceptedConsumers()` and `isAcceptedConsumer(address)`.
-
-At redemption, the contract:
-
-1. Resolves the seller through `STORE.getListing(listingId)`. A nonexistent listing
-   reverts in the store with `ListingNotFound()`.
-2. Requires `msg.sender` to be that seller.
-3. Calls `STORE.hashPurchaseRef(seller, listingId, rawPurchaseRef, purchaseRefNonce)`.
-   It does not implement its own version of the reference hash.
-4. Requires the registry's `consumedBy(purchaseRef)` to be an accepted consumer.
-   Unconsumed references return the zero address, which is never accepted.
-5. Requires `redeemedAt[purchaseRef] == 0`, writes a `uint64` timestamp, and emits
-   `EntitlementRedeemed`.
-
-The contract does **not** know the buyer's identity. It does not read receipt logs,
-call AgentKit, or determine whether off-chain content was delivered.
-
-### Backend policy and contract execution
-
-Payment proof and requester identity are separate checks. The endpoint verifies
-both before it lets the seller wallet call the contract. In the diagram,
-**Redemption** is `EntitlementRedemption`, **Authorizer** is the `AgentAuthorizer`
-interface, and **Base data** groups transaction receipts, the store, and the registry.
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant API as Endpoint
-    participant AUTH as Authorizer
-    participant BASE as Base data
-    participant E as Redemption
-
-    Note over A,AUTH: Current authorizer: signed-wallet mock, not World ID
-    A->>API: POST /v1/redemptions<br/>Proof, bundle, purchaseTxHash
-    API->>AUTH: 1. authorize(request)
-    AUTH-->>API: Verified wallet address<br/>Synthetic mock humanId
-    API->>BASE: 2. Confirm purchase tx<br/>and trusted receipt event
-    API->>BASE: 3. Reconstruct reference<br/>Match receipt, listing, seller
-    API->>BASE: 4. Check consumption<br/>by receipt emitter
-    API->>E: 5. Read redeemedAt
-    alt Already redeemed
-        API-->>A: 409 ALREADY_REDEEMED<br/>No transaction
-    else Not redeemed
-        API->>API: 6. Agent wallet<br/>equals receipt buyer?
-        alt Different wallet
-            API-->>A: 403 BUYER_MISMATCH<br/>No transaction
-        else Same wallet
-            API->>E: 7. Simulate then submit<br/>redeemEntitlement as seller
-            E->>BASE: Read seller, reference,<br/>and consumedBy
-            E->>E: Check caller + replay<br/>Write redeemedAt
-            E-->>API: EntitlementRedeemed
-            API-->>A: 201 after confirmation<br/>and event verification
-        end
-    end
-```
-
-Every failed prerequisite stops the flow. The diagram shows replay and wrong-agent
-branches explicitly because those are the demo's two distinct rejection cases.
-The contract repeats its own checks; backend validation does not replace them.
-Contract-to-store/registry calls execute on-chain, while the endpoint's reads use
-its configured Base RPC.
-
-The endpoint accepts `{ listingId, purchaseTxHash, rawPurchaseRef, purchaseRefNonce }`.
-It recognizes either `ReceiptPurchasedV2` from the configured store or
-`X402ReceiptSettled` from a trusted adapter. An adapter transaction does not need
-to contain the store event as well. The registry consumer must match the actual
-settlement emitter—not merely some other accepted module.
-
-Before checking consumption, the endpoint also loads the merchant's issued order
-by `purchaseRef` and compares the receipt's amount, metadata commitment, listing,
-and buyer with that order. An unknown order or a mismatch is rejected at step 3;
-the request cannot supply its own expected amount or metadata.
-
-The current [`AgentAuthorizer`](./packages/resource-server/src/redemption/authorizer.ts)
-implementation verifies a single-use EOA signature over the exact request digest,
-endpoint, chain, contract, wallet, and expiry. A future World implementation must
-add AgentKit verification and AgentBook resolution. See the existing [endpoint
-runbook](./packages/resource-server/REDEMPTION.md) for headers and response codes.
+The contract requires the listing seller, consumption by an accepted settlement
+module, and an unredeemed reference. It does not authenticate the buyer. The endpoint
+adds buyer matching and verifies settlement against the merchant's saved order.
+See [contract checks and endpoint sequence](./documentation/ARCHITECTURE.md#entitlement-redemption).
 
 ## References, events, and replay protection
 
-An entitlement here is a reference plus registry/redemption state—not a newly minted
-NFT or transferable token. The purchase-reference preimage includes the seller, so
-redemption uses a single `mapping(bytes32 => uint64)`, not per-seller nested mappings.
-
-### One join key, separate receipt ID spaces
-
-| Event | Emitter | What it records | Listing attribution |
-| --- | --- | --- | --- |
-| `ReceiptPurchasedV2` | Existing store | A direct Nota purchase | Carries `listingId` |
-| `X402ReceiptSettled` | New adapter | An adapter-settled purchase | Carries the signed quote's `listingId` |
-| `EntitlementRedeemed` | New redemption contract | Seller-authorized use of `purchaseRef` at a timestamp | Omits `listingId`; join to the purchase event |
-
-Use **`purchaseRef`** to join a redemption to its purchase, not `receiptId`.
-`hashPurchaseRef` takes a `listingId` to validate the seller, but that ID is **not
-committed into the reference hash**. The seller-signed quote does commit to a listing.
-The backend therefore checks the requested listing against the authoritative
-settlement event separately.
-
-### Two different one-time-use checks
-
-| Stage | State checked | Meaning |
-| --- | --- | --- |
-| Before settlement | Registry reference unconsumed | Available to be settled |
-| After settlement | `consumedBy` identifies the store or adapter; `redeemedAt == 0` | Paid through that module, not redeemed here |
-| After redemption | Registry consumption unchanged; `redeemedAt > 0` | Redeemed on this entitlement deployment |
-
-Registry consumption prevents duplicate settlement across its consumers. The
-redemption mapping prevents duplicate redemption **within one deployment**. Deploying
-a new redemption contract starts with empty state and does not automatically preserve
-the old contract's replay protection.
-
-### Keep the three nonce-like values separate
-
-| Value | Purpose | Visibility |
-| --- | --- | --- |
-| `purchaseRefNonce` | Cryptographic secrecy for the redemption preimage bundle | Private before redemption; published in redemption calldata |
-| `paymentSalt` | Fresh entropy for a quote-bound payment authorization | Public settlement calldata |
-| `authorization.nonce` | Token-level replay protection, bound to the signed quote | Public settlement calldata and adapter event |
-
-`rawPurchaseRef` is a string and is not necessarily secret. Together with
-`purchaseRefNonce`, it forms the **redemption preimage bundle**. Neither payment nonce
-nor payment salt may be derived from that bundle. Application logs must never contain
-the bundle; sending it to a redemption RPC and publishing redemption calldata are
-separate, intentional disclosures—not long-term secret storage.
+Join either store or adapter settlements to redemption by `purchaseRef`, not
+module-local receipt IDs. The hash does not commit to listing ID; the endpoint checks
+listing separately. Replay state belongs to a specific redemption deployment.
+See [event identities, state transitions and nonce visibility](./documentation/ARCHITECTURE.md#references-events-and-replay-protection).
 
 ## Deployment
 
-The order and the two separate permission checks matter:
-
-1. Deploy `NotaX402Settlement(storeAddress)`.
-2. Have the existing registry owner authorize that adapter to consume references.
-3. Deploy `EntitlementRedemption(storeAddress, [adapter])`; the store is included automatically.
-4. Configure the backend with that redemption address, trusted adapter emitters,
-   Base RPC, and dedicated seller key. Startup checks deployment wiring.
-
-### Operator commands
-
-These are operator instructions, not actions performed by the local demo. Configure
-an appropriately authorized signer: `--broadcast` sends real transactions on the
-selected network and spends gas. Never put private keys in command history.
-
-```sh
-forge script script/DeployNotaX402Settlement.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
-
-# Run separately with the existing registry owner's signer configuration:
-cast send --rpc-url "$BASE_RPC_URL" 0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991 \
-  "setConsumerAuthorization(address,bool)" <adapter-address> true
-
-# Then deploy redemption with that adapter accepted:
-ENTITLEMENT_ACCEPTED_CONSUMERS=<adapter-address> \
-  forge script script/DeployEntitlementRedemption.s.sol --rpc-url "$BASE_RPC_URL" --broadcast
-```
-
-The [adapter deployment script](./script/DeployNotaX402Settlement.s.sol) prints the
-required registry-owner action. The [redemption deployment script](./script/DeployEntitlementRedemption.s.sol)
-prints the fixed accepted-consumer set and warns when no adapters are supplied.
-
-Without registry authorization, adapter settlement reverts with `UnauthorizedConsumer`.
-Without inclusion in the redemption deployment, references consumed by that adapter
-fail there with `EntitlementNotPaid`. Neither omission is fixed by changing a backend
-environment variable. Adding a consumer later requires a new redemption deployment
-and a plan for already-redeemed references.
+Both new contracts and registry authorization are already recorded above. Deployment
+order is adapter → registry authorization → redemption with adapter accepted.
+Do not redeploy to record the demo. [Operator procedures](./documentation/OPERATIONS.md#deployment)
+explain both permission gates and why a new redemption deployment changes replay scope.
 
 ## Backend architecture
 
@@ -473,8 +325,9 @@ bundle in transaction calldata.
 
 `AgentConfig.onBundleCreated` is an optional asynchronous hook for privately retaining
 the buyer's copy before checkout. A failed hook aborts before any request or payment.
-Without it, that copy is in memory until `payAndFetch` returns it; the connected demo
-uses in-memory retention, not a durable buyer wallet vault. Authenticated paid access
+Without it, that copy is in memory until `payAndFetch` returns it. The fork demo uses
+in-memory buyer retention; live mode saves a private recovery copy before checkout.
+Neither is a production buyer wallet vault. Authenticated paid access
 can still recover the merchant-held copy after a merchant restart. Buyer binding is
 to the wallet signing payment; World registration remains a separate pending check.
 
@@ -508,205 +361,33 @@ for the paid-resource protocol.
 
 ## Public evidence indexing with The Graph
 
-[`packages/subgraph`](./packages/subgraph) contains the schema, event mappings, and
-deterministic tests for a read-only index of Nota purchase and redemption evidence.
-**Status: deployed to Studio; live baseline-receipt compatibility verified on
-2026-09-12. All three Base data sources are configured. Decentralized-network
-publication and backend integration are not complete.** No new adapter settlements
-or redemptions were present at the verified snapshot. World
-authentication remains a separate, pending integration.
+**Recorded status, reviewed 2026-09-13:** Studio deployed; mainnet settlement and
+redemption for listing 2 (0.10 USDC) matched the index on 2026-09-12. Both manifests
+have `publicDemo`, `newPublicPurchaseAndRedemptionDemoRecorded: true`, and
+`publicDemo.indexVerification.status: EVENTS_INDEXED_AND_MATCHED`.
 
-### Studio deployment and verification evidence
+- [Base deployment and demo evidence](./deployments/base.json)
+- [Studio deployment and verification provenance](./deployments/subgraph-base.json)
+- [Studio explorer](https://thegraph.com/studio/subgraph/nota-entitlements)
+- [Query endpoint](https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1)
 
-- [Studio: Nota Entitlements](https://thegraph.com/studio/subgraph/nota-entitlements), version `v0.0.1`.
-- [Query endpoint](https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1).
-- Deployment CID: `QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp`.
-- Machine-readable evidence: [`deployments/subgraph-base.json`](./deployments/subgraph-base.json).
+The recorded mainnet reference is
+`0xb3368376783682607e36f2c62fc198957bddea962dd42f20af05a0ffd57e6b94`.
+Its settlement at block **51,220,814**, log **247**, and redemption at block
+**51,220,820**, log **702**, were checked at indexed block **51,221,518**.
+This documents one purchase, not current availability, completeness or a fresh query.
 
-The live preflight returned `INDEX_COMPATIBILITY_VERIFIED` at finalized snapshot
-block **51,208,878**, hash
-`0x68dd920f52a5bdac02c99759950abb88b928d53ada1b11efa21fb98c1a1c0cc6`.
-Contract wiring and registry authorization were checked separately at block
-**51,209,480**. The index reported no indexing errors and passed the freshness,
-source and pagination checks. **One existing store settlement** matched receipt #1
-against Base RPC; **zero adapter settlements and zero redemptions** were returned.
-These counts describe that snapshot, not current totals or proof of a new connected demo.
+The earlier snapshot at **51,208,878** still correctly records one baseline store
+settlement, zero adapter settlements and zero redemptions. Its original fields,
+block hashes and timestamps are preserved. [Historical snapshots and index operations](./documentation/INDEXING.md)
+explain the distinct checks and scopes.
 
-**Live connected demo indexed (2026-09-12).** The Base mainnet demo purchase
-(`purchaseRef` `0xb336…6b94`, listing 2, 0.10 USDC) is indexed by the same deployment
-with no indexing errors: its `X402_ADAPTER` settlement
-([`0xa5ad9c2e…`](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e),
-block 51,220,814, log 247) and redemption
-([`0x59207b64…`](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194),
-block 51,220,820, log 702) matched the recorded transactions, block hashes and Base RPC
-log indexes. This covers that one purchase, not event completeness; details are under
-`publicDemo.indexVerification` in both deployment manifests.
-
-The first upload failed because the event JSON ABIs omitted explicit `anonymous`
-and non-indexed input flags. Those defaults are now explicit in all three ABI files,
-with a regression test; the successful deployment above contains the corrected ABIs.
-No Solidity change or contract redeployment was required. The corresponding source
-is commit `5e9d14b80cd41a31a9f2537b1d1b55ef71e8e24f`, committed after the upload.
-
-```mermaid
-flowchart LR
-    N["NotaReceiptStore<br/>ReceiptPurchasedV2"] --> S["Settlement evidence"]
-    X["NotaX402Settlement<br/>X402ReceiptSettled"] --> S
-    S --> P["Purchase<br/>chain + registry + purchaseRef"]
-    E["EntitlementRedemption<br/>EntitlementRedeemed"] --> R["Redemption evidence<br/>includes contract address"]
-    R --> P
-    P -.-> Q["Planned: agent history and reconciliation"]
-```
-
-The mappings cover the three event types, not every event or every state variable
-in the contracts. They never submit transactions or change the settlement and
-redemption rules.
-
-| Entity | Identity / meaning |
-| --- | --- |
-| `Purchase` | `chainId:registry:purchaseRef` joins settlement and redemption evidence; receipt IDs are not join keys |
-| `Settlement` | `chainId:transactionHash:logIndex` preserves the emitter, receipt ID, buyer, seller, listing, amount, metadata hash, agent ID, and block provenance |
-| `Redemption` | Independent event evidence including `redemptionContract`; there is deliberately no global `Purchase.redeemed` flag |
-| `Listing` | `chainId:store:listingId` groups observed settlement references, not a complete catalog or current listing state |
-
-Duplicate processing of the same log is idempotent. Distinct settlement logs claiming
-the same reference are retained and marked `CONFLICTED`; later claims do not silently
-replace the first buyer or purchase terms. A redemption without indexed purchase
-history creates an `UNKNOWN` purchase, not a fabricated receipt. `SETTLED` means an
-event was indexed, **not** that the current endpoint authorizes redemption.
-
-The [manifest](./packages/subgraph/subgraph.yaml) pins three static Base data sources,
-each starting at its verified creation block:
-
-| Data source | Start block |
-| --- | --- |
-| Existing `NotaReceiptStore` | `50,536,305` |
-| `NotaX402Settlement` | `51,184,074` |
-| `EntitlementRedemption` | `51,184,221` |
-
-The new addresses match [`deployments/base.json`](./deployments/base.json) above.
-Every source uses the same chain/store/registry context, so adapter settlements and
-redemptions join the existing purchase evidence by `chainId:registry:purchaseRef`.
-There are no inactive templates, wildcard emitters, or automatic discovery of future
-deployments. Configuration tests catch drift in addresses, blocks, context, and handlers.
-A hosted subgraph cannot observe contracts deployed only on the local demo fork.
-
-Only public event fields are indexed. The schema contains neither `rawPurchaseRef`
-nor `purchaseRefNonce`, and mappings do not inspect redemption calldata. The public
-EIP-3009 `authorizationNonce` is a different value, not the private preimage nonce.
-A metadata hash proves a commitment, not access to the underlying document or
-proof of fulfillment. An event's `agentId` is not human-verification evidence.
-
-Future queries can support purchase history, spending summaries, and candidate
-unredeemed purchases **for a selected redemption deployment**. Before acting, the
-backend must still check authoritative RPC state, accepted consumers, expected order
-terms, and buyer authentication. Missing data, indexing lag/errors, conflicting
-claims, or uncertain finality mean **unknown**, not permission to redeem. Live
-validation must include indexer health, block freshness, and pagination. Gas and
-query infrastructure can incur costs; this adds no new protocol fee and makes no
-free-query or free-gas claim.
-
-### Build and test the index
-
-Use Node.js **22** (minimum 20.19), then run from the repository root:
-
-```sh
-npm ci
-npm run subgraph:build
-npm run subgraph:test
-```
-
-The build generates types and compiles all three mappings to WASM. Matchstick 0.6.0
-executes deterministic tests of the actual AssemblyScript handlers without Base RPC
-or Graph credentials. Its first run downloads the platform-specific test runner;
-CI uses Ubuntu 22.04 for that binary. ABI parity tests also run with `npm test`.
-Generated code, compiled artifacts, and downloaded runners are ignored by Git.
-
-Tooling caveat: `npm audit` currently reports advisories in Graph CLI transitive
-development dependencies, including a critical `decompress` archive-extraction
-advisory. A successful build does not resolve those findings. Do not use this
-toolchain to process untrusted archives or expose its development services; review
-the dependency findings before deployment tooling is approved. Existing application
-dependency versions are unchanged by this index implementation.
-
-### Live-indexing preparation and verification
-
-The existing store's [creation transaction](https://basescan.org/tx/0x78301d0cffc614a1ad591275a96fbdd413fddb73568d57fe6bda3a37e4055266)
-succeeded on Base at block `50,536,305`, with the expected contract address. Its
-creation was located through Blockscout and checked against Base RPC. The read-only
-preflight rechecks that evidence, the chain ID and registry wiring, and the actual
-`ReceiptPurchasedV2` log for [receipt #1](https://basescan.org/tx/0x3b9656b4a67dee38ca2bd28d8841fbb67469c0ed3f9ace2977e5b753e7230978)
-at block `50,833,757`, log index `474`. This is **pre-existing receipt evidence**,
-not a new purchase or World-registration demonstration. No preimage bundle is needed.
-
-It also checks both new creation receipts against the deployment record, their runtime
-code hashes and store/registry wiring, the adapter's USDC address, redemption's exact
-accepted set of store + adapter, and the adapter's current registry authorization.
-Code and state reads share one RPC block, which is printed in the report; registry
-authorization can later be revoked. These are read-only checks, not transactions.
-The preflight transport allows only the required read methods. Rate-limit responses
-(including Base public RPC's `-32016`) get at most two retries with 5s/10s backoff;
-exhausted retries and all other RPC errors fail the check. Each request times out
-after 20 seconds. A rate-limited public RPC is not evidence of a contract failure.
-The selected RPC must serve historical transaction receipts and blocks as well as
-current state; some public providers restrict archive access. There is no automatic
-switch to another provider or bypass of failed evidence checks.
-
-Preparation validation on **2026-09-12**: the RPC-only preflight succeeded with
-deployment state checked at Base block **51,204,343**. It reported
-`RPC_EVIDENCE_VERIFIED_ONLY` and `graphVerified: false`; this did not query a live
-subgraph or prove that new purchase/redemption events have been indexed.
-
-```sh
-# RPC-only preparation: no Graph account, keys, publication, or transactions.
-BASE_RPC_URL=https://your-base-rpc npm run subgraph:preflight
-
-# Recheck the recorded Studio deployment (read-only).
-BASE_RPC_URL=https://your-base-rpc \
-GRAPH_QUERY_URL=https://api.studio.thegraph.com/query/1753681/nota-entitlements/v0.0.1 \
-GRAPH_DEPLOYMENT_ID=QmQ4y2CoqUvfVmU4cuyvuVQZ9M9EuLfiYy2CzbvQp7NnQp \
-npm run subgraph:preflight
-```
-
-Without `GRAPH_QUERY_URL`, the command reports `RPC_EVIDENCE_VERIFIED_ONLY` with
-`graphVerified: false`. With it, the command requires the expected deployment CID,
-healthy index metadata and no more than 300 blocks of lag relative to RPC. It
-cross-checks the indexed block hash against RPC, selects an indexed, finalized
-snapshot after both contracts were deployed, and paginates settlements and redemptions
-at that fixed block hash using increasing IDs. Settlement kind/emitter pairs must be
-the configured store or adapter; redemptions must come from the configured redemption
-contract. Every row must use the expected chain/store/registry and fall between its
-source's start block and the selected snapshot.
-Missing metadata, GraphQL errors (even with partial data), a changed deployment or
-snapshot, invalid cursors, and exhausted page limits all fail the check. The cap is
-100 pages of 100 rows per entity type; a larger index requires an explicitly reviewed cap change,
-not a partial-success claim. Endpoint URLs and provider error details are not logged.
-
-Success compares receipt #1's public fields and log/block provenance against RPC
-and reports `INDEX_COMPATIBILITY_VERIFIED`. This is a compatibility check for that
-receipt plus source/pagination checks across the returned store/adapter settlements
-and redemptions—not an independent audit of every indexed event and never permission
-to redeem. Adapter settlement and redemption counts are reported separately; zero
-new events is not proof that those live mappings work. A new public purchase and
-redemption must still be compared with RPC evidence for the connected demo. The
-recorded Studio endpoint passed this compatibility check on 2026-09-12;
-rerun it before relying on a current view. Deterministic tests exercise its failure
-cases without credentials.
-
-Next steps: connect agent history/reconciliation to the live index and resolve the
-still-open deployment-tool dependency findings. Studio deployment did not resolve
-those advisories. Keep deployment keys local; do not commit or paste them into
-documentation. Publishing a subgraph to
-the decentralized network and any associated on-chain spending require their own
-approval. Agent reconciliation follows live receipt validation; a public indexed
-purchase-to-redemption demo additionally requires an approved new purchase and
-redemption using the recorded Base deployments. World registration can progress
-independently throughout.
-
-Implementation references: [Graph manifests](https://thegraph.com/docs/en/subgraphs/developing/creating/subgraph-manifest/),
-[GraphQL schemas](https://thegraph.com/docs/en/subgraphs/developing/creating/ql-schema/),
-and [Matchstick testing](https://thegraph.com/docs/en/subgraphs/tooling/unit-testing-framework/).
-The preflight follows the documented [GraphQL metadata, historical queries, and cursor pagination](https://thegraph.com/docs/en/subgraphs/querying/graphql-api/).
+The index joins public settlement and redemption events. It never reads bundle
+calldata or authorizes redemption. **The backend does not query the live subgraph**;
+the report is illustrative, not Graph analytics. Story mode prints a query without
+executing it; fork Act 6 uses the separate recorded mainnet reference. Studio is not
+published to the decentralized network. World registration and deployment-tool
+advisory resolution remain unverified. No free-gas or free-query claim is made.
 
 ## Trust boundaries and limitations
 
@@ -743,7 +424,8 @@ upstream dependencies, and non-guarantees.
 With Node.js 22 (minimum 20.19), Foundry/Anvil (CI pins 1.8.1), initialized submodules, and `npm ci`:
 
 ```sh
-BASE_RPC_URL=https://your-base-mainnet-rpc npm run demo:connected
+export BASE_RPC_URL   # already configured in your shell/secret manager
+npm run demo:connected
 ```
 
 The command starts a **disposable local Base fork** and uses the real deployed
@@ -772,7 +454,8 @@ only selected public fields; errors do not dump response bodies or RPC calldata.
 **Limits:** requester authentication is still `mock-wallet`, with `humanVerified: false`.
 The bundle is freshly **buyer-generated**, shared with the merchant through checkout,
 and kept in memory by the demo buyer. Real World authentication remains unfinished.
-All printed transaction hashes belong to the local fork, not a public deployment.
+Walkthrough transaction hashes belong to the local fork. Story Act 6 separately labels
+links for the previously recorded mainnet purchase; they are not this fork's transactions.
 Services, fork state, and the temporary issued-order file are disposed after the run.
 This command requires a working Base RPC and fails rather than silently switching to mocks.
 
@@ -784,7 +467,7 @@ tests continue to run without an external RPC. Scripts do not automatically load
 
 ```sh
 npm run demo:connected -- --story         # disposable fork, no real spending
-npm run demo:connected -- --live --story  # real Base funds; same confirmation and safety gates
+npm run demo:connected -- --live --story  # currently blocked by existing publicDemo records
 ```
 
 An interactive terminal is required. Six title cards cover **offer → payment →
@@ -810,6 +493,12 @@ The cards show the verified line-item amounts, metadata hash, buyer wallet and
 transaction count, gas payer, and the attacker/replay rejection reasons. No bundle
 values or arbitrary metadata text are printed.
 
+Story mode also prints each actual application HTTP method, endpoint and response
+status: checkout, settlement, access challenges/GETs, and redemption challenges/POSTs.
+Only known application routes are shown; credentials, URL query strings/fragments,
+request bodies, proof headers and RPC URLs are excluded. The final Graph endpoint
+is still a query to run manually, not an HTTP request made by the demo.
+
 The final act prints the Studio endpoint, public `purchaseRef` and a query to paste.
 On a fork it explicitly switches to the **separate, previously recorded mainnet
 purchase** in `deployments/base.json`, with its settlement/redemption links and
@@ -828,79 +517,18 @@ committed automatically.
 
 ### Connected demo on deployed Base mainnet contracts
 
-**Real spending, opt-in only.** The default `npm run demo:connected` remains fork-only.
-`npm run demo:connected -- --live` reads the adapter/redemption addresses from
-[`deployments/base.json`](./deployments/base.json); it never deploys replacements,
-impersonates accounts, or fabricates balances. It runs the same HTTP flow above,
-including the attacker attempt **before** the successful redemption so the rejection
-demonstrates buyer binding, not merely replay protection. Authentication remains
-**mock-wallet**, not World human verification.
+**Current snapshot: both manifests already contain `publicDemo`.** The CLI rejects
+another paid run after local configuration checks, before RPC preflight and the
+confirmation prompt. `--live` and `--live --story` are not repeat-recording shortcuts.
+There is no force/reset/resume/yes flag; preserve the guard and the existing evidence.
 
-Required environment: `BASE_RPC_URL` (HTTPS, with historical receipt/state access),
-`SELLER_PRIVATE_KEY`, `BUYER_PRIVATE_KEY`, `LIVE_DEMO_USDC_AMOUNT` and
-`LIVE_DEMO_STATE_DIR`. Optional `RELAYER_PRIVATE_KEY` defaults to the seller key.
-A dedicated RPC is recommended: shared public endpoints can throttle this multi-step
-flow. The runner does not blindly resubmit payments after a provider failure.
-Seller/relayer need real Base ETH for gas; the distinct buyer needs real Base USDC.
-The buyer signs EIP-3009 and access/redemption challenges, but sends no transaction.
-Use dedicated, non-delegated EOA wallets and do not send other wallet transactions
-while the demo runs. Keys must already be available in the process environment;
-never paste them into command history or commit them.
-
-From the repository root, with the keys and RPC already configured:
-
-```sh
-export LIVE_DEMO_USDC_AMOUNT=0.10
-export LIVE_DEMO_STATE_DIR="$PWD/private-data/base-live-demo-1"
-npm run demo:preflight          # read-only: no confirmation, lock, transactions or files
-npm run demo:connected -- --live
-```
-
-`demo:preflight` runs the same chain, deployment, wallet and balance checks the live
-run performs before its first transaction, and names the failing check (for RPC
-failures, only the error type). The live run repeats these checks before the
-confirmation prompt.
-
-The amount is mandatory, accepts up to six decimals, and is capped at 10 USDC.
-The original fork catalog remains 10 USDC; the live demo uses the amount you select
-and labels its report as illustrative content. Inspect the displayed wallet addresses,
-deployed contracts and amount, then type **`SPEND ON BASE`** at the interactive prompt.
-Piped confirmation, non-interactive execution, unknown flags and `--yes` are refused.
-Gas is additional and variable. Cancellation happens before any live-chain write.
-
-The runner checks chain ID, recorded contract bytecode/wiring, registry authorization,
-wallet code, pending transactions and balances before listing creation. It derives
-the listing ID from the confirmed `ListingCreated` event rather than a racy global
-counter. Successful broadcasts print the transaction hash and a `basescan.org/tx/`
-URL immediately; receipts require two confirmations. Unlike a fork, advancing block
-height during attacker/replay attempts is normal; sender transaction counts and
-redemption state still enforce the no-extra-transaction assertions.
-
-**Recovery:** the new private directory is retained, not deleted at exit. It contains
-owner-only issued orders, the buyer's original preimage bundle, listing details and
-a public transaction journal. Do not share it or record its contents in the video.
-Never blindly retry after a send timeout or partial failure: reconcile printed hashes
-first. A new run creates a new listing/purchase; it is not a resume command. The
-runner refuses an existing state directory or replacement of an already recorded demo.
-A `private-data/live-demo.lock` prevents concurrent runs and remains after an incomplete
-run. It is removed automatically after successful evidence recording or a controlled
-story cancellation at a completed step/prompt; reconcile
-the previous run before manually removing a retained lock, even if startup failed.
-
-Only after all three scenarios and the confirmed event/receipt checks pass does it
-save `public-evidence.json` in that directory and add a `publicDemo` record to **both**
-deployment manifests, setting `scope.newPublicPurchaseAndRedemptionDemoRecorded`
-to `true`. Those edits are local and uncommitted. Prior Graph verification counts
-and World status remain unchanged: verify these new events in Studio separately.
-Manifest replacement is atomic per file, not across both files; if recording fails,
-use the saved public evidence to reconcile the files, **not another payment**.
-
-No live purchase was executed merely by adding this mode. Its mainnet evidence flags
-remain false until a successful operator-confirmed run.
+Use `npm run demo:connected -- --story` with exported `BASE_RPC_URL` for a repeatable
+fork recording. [Live operator reference](./documentation/OPERATIONS.md#connected-demo-on-deployed-base-mainnet-contracts)
+records configuration, confirmation, transaction journaling and recovery constraints.
 
 ### Redemption backend demo
 
-With Node.js 20+, Foundry/Anvil, and initialized submodules:
+With Node.js 22 recommended (minimum 20.19), Foundry/Anvil 1.8.1, and initialized submodules:
 
 ```sh
 git submodule update --init --recursive
@@ -952,8 +580,9 @@ forge test
 forge fmt --check
 npm run typecheck
 npm test
-# Include TypeScript Base compatibility tests:
-BASE_RPC_URL=https://your-base-mainnet-rpc npm test
+# Include TypeScript Base compatibility tests (BASE_RPC_URL already configured):
+export BASE_RPC_URL
+npm test
 ```
 
 The mock store does not verify seller signatures—it exposes the validation result
@@ -964,7 +593,8 @@ from adapter settlement to redemption. Domain separators are checked against the
 deployed contracts rather than inferred from the mocks.
 
 ```sh
-BASE_RPC_URL=https://your-base-mainnet-rpc forge test
+export BASE_RPC_URL   # Solidity fork tests read it through vm.envOr
+forge test
 ```
 
 CI pins Foundry to the version in [.github/workflows/test.yml](./.github/workflows/test.yml)
@@ -977,13 +607,10 @@ listing:      1
 purchaseRef:  0x5333d780992fdf98c143083b765392aeaa27cb393a034235026f57f202806770
 ```
 
-Copy `.env.example` to `.env` or export these variables in your shell:
-
-```sh
-BASE_RPC_URL=https://your-base-mainnet-rpc
-RECEIPT_1_RAW_PURCHASE_REF=your-raw-reference
-RECEIPT_1_PURCHASE_REF_NONCE=0x...
-```
+For the optional receipt-#1 tests, supply `RECEIPT_1_RAW_PURCHASE_REF` and
+`RECEIPT_1_PURCHASE_REF_NONCE` through a secure local environment. Do not put real
+values in shell commands, screenshots or logs. Export `BASE_RPC_URL` for child
+processes. Copying `.env.example` to `.env` does not configure TypeScript scripts.
 
 Bundle-dependent integration tests skip when either receipt variable is absent. The remaining fork tests still exercise caller authorization, unpaid references, and nonexistent listings against the live deployment.
 
@@ -1006,6 +633,26 @@ The connected demo now uses a new buyer-generated preimage bundle and binds the 
 to buyer A's signing wallet. The final World demonstration must additionally authenticate
 that wallet through AgentKit and exercise real registered agents. Receipt #1 and the local mock demo establish different things and cannot
 substitute for that verification. No automatic World-to-mock downgrade is implemented.
+
+## Sponsor boundaries and submission information
+
+Official pages checked **2026-09-13**; eligibility is not established by this README.
+
+- [World AgentKit Continuity](https://ethglobal.com/events/ethonline2026/prizes/world)
+  requires meaningful AgentKit use, a working app, AgentBook registration/resolution
+  where relevant, Sandbox App testing and feedback. This checkout has the mock seam
+  and feedback notes, not the unfinished World implementation or sandbox evidence.
+- [The Graph AI Continuity track](https://ethglobal.com/events/ethonline2026/prizes/the-graph)
+  requires The Graph to be integral to AI tooling or an agent/app's live data use,
+  plus meaningful work with that data, not simply printing a query result. Our
+  custom subgraph and recorded event checks are implemented; the application does
+  not consume Graph data. The composable/standardized-products track separately
+  requires product composition or meaningful standardized-schema use; one custom
+  subgraph does not establish that. No qualification claim is made for either track.
+- [Event submission rules](https://ethglobal.com/events/ethonline2026/info/details)
+  require a public project record, a 2–4 minute demo, Continuity separation and AI
+  attribution; spec-driven work must include its prompts/specs/planning artifacts.
+  See the [AI-use record](./documentation/AI_USAGE.md).
 
 ## License
 

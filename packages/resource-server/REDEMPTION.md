@@ -1,4 +1,4 @@
-# Day 4 redemption service
+# Redemption service
 
 Implemented: real signed-wallet authentication behind `AgentAuthorizer`, authoritative
 settlement verification, buyer policy, seller submission, and deterministic tests.
@@ -18,7 +18,7 @@ npm ci
 npm run demo:redemption
 ```
 
-Requires Node.js 20+ and Foundry/Anvil (CI pins 1.8.1). No RPC, live keys, phone app,
+Requires Node.js 22 recommended (minimum 20.19) and Foundry/Anvil (CI pins 1.8.1). No RPC, live keys, phone app,
 registration, or funding is needed. The fixture creates a new buyer-generated bundle,
 binds the quote buyer to A, settles using real EIP-3009 signature verification in the
 existing mock token, and redeems through the unchanged contract. Mock Nota dependencies
@@ -31,10 +31,23 @@ A succeeds; A signs a new challenge and fails at step 5. No secrets are printed.
 For the **connected** HTTP 402 → settlement → authenticated access → redemption story,
 run `npm run demo:connected` with `BASE_RPC_URL` exported. It uses the real deployed
 Nota/USDC dependencies on a disposable local fork, not the standalone demo's mock
-dependencies. The resource server issues the bundle, persists the order, and releases
-the bundle to A after authenticated payment. The redemption service reads those
+dependencies. The buyer generates the original bundle and POSTs it privately with
+`X-PAYER`; the client checks the quote commits to that original bundle before signing.
+The resource server persists a copy and can return it through authenticated paid
+access. Legacy GET checkout generates bundles at the merchant and is not the current
+client path. The redemption service reads those
 orders through a separate file-store instance. Authentication remains mock-wallet.
 See the [connected demo runbook](../../README.md#connected-purchase-to-redemption-demo).
+
+The merchant and RPC see the bundle before redemption; redemption calldata publishes
+it. The report is delivered before redemption, so this is not one-time file access
+or proof of fulfillment. A seller can bypass the endpoint; contract replay protection
+is per redemption deployment. See the [three-outcome enforcement table](../../README.md#demo-outcomes-and-enforcement).
+
+Current evidence: both manifests contain the 2026-09-12 mainnet purchase/redemption
+and Studio event verification, but no World verification. `--live` refuses another
+recorded purchase; `npm run demo:connected -- --story` is the repeatable fork path.
+It prints a query for separate recorded mainnet evidence; it does not execute it.
 
 ## Connect to a configured Base deployment or Base fork
 
