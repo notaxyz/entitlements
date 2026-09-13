@@ -19,12 +19,12 @@ redemption deployment.
 - **Buyer** with the same bundle → `201`, redeemed, `EntitlementRedeemed` emitted
 - **Buyer again** → `409 ALREADY_REDEEMED`, no second transaction
 
-<!-- TODO before submission: add a "Demo video" link as the first item of the proof line below. -->
-[Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
+<!-- TODO: add a "Demo video" link after the showcase link once it has a public URL. -->
+[ETHGlobal showcase](https://ethglobal.com/showcase/nota-entitlements-88xhn) · [Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
 
 Built during ETHOnline on top of the pre-existing Nota protocol ([BASELINE.md](./BASELINE.md)).
-The demo video runs on a local Base fork; the links above are a separate, real Base
-mainnet purchase ([fork vs. real](#fork-walkthrough-and-real-purchase)). Authentication
+The demo video runs on a local Base fork; the settlement, redemption, subgraph and run-record
+links are a separate, real Base mainnet purchase ([fork vs. real](#fork-walkthrough-and-real-purchase)). Authentication
 is a mock wallet seam; World registration is pending — see
 [World integration status](#world-integration-status).
 
