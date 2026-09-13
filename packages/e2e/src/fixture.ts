@@ -79,6 +79,8 @@ export interface Fixture {
   resourceUrl: string;
   resourceBaseUrl: string;
   facilitatorUrl: string;
+  /** Public local HTTP origin, used only to identify story-mode requests. */
+  redemptionBaseUrl?: string;
   redemption: Address;
   redemptionChain: ViemRedemptionChain;
   redemptionLogs: AuditRecord[];
@@ -411,6 +413,7 @@ export async function startFixture(): Promise<Fixture> {
       resourceBaseUrl,
       resourceUrl: `${resourceBaseUrl}/reports/base-usdc-flows-2026-09`,
       facilitatorUrl: facilitator.url,
+      redemptionBaseUrl,
       redemption,
       redemptionChain,
       redemptionLogs,

@@ -64,6 +64,8 @@ function setup(mode: "fork" | "live" = "fork", pause = vi.fn(async () => {})) {
     relayer: "0x0000000000000000000000000000000000000003",
     buyer: "0x0000000000000000000000000000000000000001",
     resourceUrl: "http://127.0.0.1:1234/reports/base-usdc-flows-2026-09",
+    facilitatorUrl: "http://127.0.0.1:1235",
+    redemptionBaseUrl: "http://127.0.0.1:1236",
     paymentAmount: 100_000n,
     publicClient: {
       getBalance: vi.fn(async () => (mode === "live" ? 123n : 0n)),
@@ -112,6 +114,44 @@ function setup(mode: "fork" | "live" = "fork", pause = vi.fn(async () => {})) {
 }
 
 describe("story presentation", () => {
+  it("logs real application endpoints and statuses, never credentials, bundles or RPC requests", async () => {
+    const s = setup();
+    const secret = "private-marker-do-not-log";
+    const upstream = vi.fn(async () => new Response(null, { status: 403 }));
+    const observed = s.story.observeFetch(upstream);
+    const endpoints = [
+      ["POST", s.fixture.resourceUrl],
+      ["POST", `${s.fixture.facilitatorUrl}/settle`],
+      ["POST", "http://127.0.0.1:1234/access/challenge"],
+      ["GET", s.fixture.resourceUrl],
+      ["POST", `${s.fixture.redemptionBaseUrl}/v1/redemptions/challenge`],
+      ["POST", `${s.fixture.redemptionBaseUrl}/v1/redemptions`],
+    ];
+    for (const [method, endpoint] of endpoints) {
+      const url = new URL(endpoint!);
+      url.username = secret;
+      url.password = secret;
+      url.search = `?purchaseRefNonce=${secret}`;
+      url.hash = secret;
+      await observed(url, {
+        method,
+        headers: { authorization: secret },
+        ...(method === "POST" ? { body: secret } : {}),
+      });
+      expect(s.out.join("\n")).toContain(`${method} ${endpoint}`);
+      expect(s.out.join("\n")).toContain(`403 — ${method} ${endpoint}`);
+    }
+    const count = s.out.length;
+    await observed(`https://rpc.example/${secret}`, {
+      method: "POST",
+      body: secret,
+    });
+    await observed(`http://127.0.0.1:1236/unknown/${secret}`);
+    expect(s.out).toHaveLength(count);
+    expect(s.out.join("\n")).not.toContain(secret);
+    expect(s.out.join("\n")).not.toContain("purchaseRefNonce");
+    expect(upstream).toHaveBeenCalledTimes(8);
+  });
   it("accepts both flag orders without changing the default or accepting bypass flags", () => {
     expect(demoMode(["--story"])).toBe("fork");
     expect(demoMode(["--live", "--story"])).toBe("live");

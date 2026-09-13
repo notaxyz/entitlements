@@ -118,6 +118,50 @@ export function createStory(
         ? `https://basescan.org/tx/${hash}`
         : `Local fork transaction: ${hash}`,
     );
+  // Only known application routes are printable. Never log arbitrary fetch/RPC
+  // URLs, userinfo, query strings, fragments, request bodies or proof headers.
+  const routes = [
+    [f.resourceUrl, ["GET", "POST"]],
+    [new URL("/access/challenge", f.resourceUrl).href, ["POST"]],
+    ...(f.facilitatorUrl
+      ? [[new URL("/settle", f.facilitatorUrl).href, ["POST"]]]
+      : []),
+    ...(f.redemptionBaseUrl
+      ? [
+          [
+            new URL("/v1/redemptions/challenge", f.redemptionBaseUrl).href,
+            ["POST"],
+          ],
+          [new URL("/v1/redemptions", f.redemptionBaseUrl).href, ["POST"]],
+        ]
+      : []),
+  ] as [string, string[]][];
+  function requestLabel(
+    input: Parameters<typeof fetch>[0],
+    init?: RequestInit,
+  ) {
+    try {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const match = routes.find(([endpoint, methods]) => {
+        const allowed = new URL(endpoint);
+        return (
+          allowed.origin === url.origin &&
+          allowed.pathname === url.pathname &&
+          methods.includes(method)
+        );
+      });
+      if (match) {
+        const safe = new URL(match[0]);
+        return `${method} ${safe.origin}${safe.pathname}`;
+      }
+    } catch {
+      /* Do not expose a malformed URL or its parser error. */
+    }
+    return undefined;
+  }
   return {
     async start() {
       check();
@@ -142,7 +186,10 @@ export function createStory(
     // the same 402; runConnectedDemo's only change remains awaiting its existing callbacks.
     observeFetch(upstream: typeof fetch): typeof fetch {
       return async (input, init) => {
+        const endpoint = requestLabel(input, init);
+        if (endpoint) line("HTTP request", endpoint);
         const response = await upstream(input, init);
+        if (endpoint) line("HTTP response", `${response.status} — ${endpoint}`);
         if (
           String(input) === f.resourceUrl &&
           init?.method === "POST" &&

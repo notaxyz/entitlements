@@ -31,6 +31,18 @@ describeFork("story narration on a disposable Base fork", () => {
       expect(steps[6]?.code).toBe("ALREADY_REDEEMED");
       expect(output.join("\n")).not.toMatch(/rawPurchaseRef|purchaseRefNonce/);
       expect(output.filter((line) => line.includes("ACT "))).toHaveLength(6);
+      const text = output.join("\n");
+      expect(text).toContain(`402 — POST ${fixture.resourceUrl}`);
+      expect(text).toContain(`200 — POST ${fixture.facilitatorUrl}/settle`);
+      expect(text).toContain(
+        `200 — POST ${fixture.resourceBaseUrl}/access/challenge`,
+      );
+      expect(text).toContain(`200 — GET ${fixture.resourceUrl}`);
+      for (const status of [403, 201, 409]) {
+        expect(text).toContain(
+          `${status} — POST ${fixture.redemptionBaseUrl}/v1/redemptions`,
+        );
+      }
     } finally {
       globalThis.fetch = originalFetch;
       await fixture.stop();

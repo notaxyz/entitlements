@@ -338,6 +338,7 @@ export async function startLiveFixture(
       resourceBaseUrl,
       resourceUrl: `${resourceBaseUrl}/reports/${id}`,
       facilitatorUrl: facilitator.url,
+      redemptionBaseUrl,
       redemptionChain,
       redemptionLogs,
       persistBuyerBundle: (bundle) => save("buyer-bundle.json", bundle),
