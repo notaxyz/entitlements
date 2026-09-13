@@ -1,52 +1,54 @@
 # Nota Entitlements
 
-**For developers building purchasing agents and merchants selling paid API resources.**
-A payment proves money moved; it does not, by itself, bind the requester's identity
-to what was bought or prevent repeated redemption.
+A receipt you can spend once — and only the wallet that paid for it can spend it.
 
-Our concrete demo buys an **illustrative Base USDC flows report**: the agent checks
-itemized terms, authorizes USDC payment without sending a transaction, authenticates
-for paid access, and requests one seller-submitted redemption. During the event we
-built the EIP-3009 settlement adapter, entitlement contract, buyer-authenticated
-backend, restart recovery, connected demo, and Graph event index over the
-[pre-existing Nota protocol](./BASELINE.md).
+A plain payment proves money moved. It does not say what was bought, and it does not
+entitle anyone to collect it. When an agent buys a paid API resource, nothing connects
+the USDC transfer to what the seller agreed to deliver or to who may claim it. This is
+for developers building purchasing agents and merchants selling paid API resources.
 
-**Three outcomes:** B's stolen bundle is rejected; buyer A redeems successfully;
-A's fresh signed retry is rejected without another transaction.
+The buyer generates a redemption bundle and shares it privately with the merchant; the
+Nota store hashes it into a public purchase reference. The seller signs a quote
+committing to that reference. The buyer pays USDC with an EIP-3009 authorization, so a
+facilitator submits the transaction and the buyer sends none. Later the buyer presents
+the bundle: the merchant's endpoint checks that the presenting wallet is the one that
+paid, and the seller submits the redemption, which the contract records once for that
+redemption deployment.
 
-- **Watch:** demo video URL not yet supplied.
-- **Run:** [Git-checkout quickstart](#quickstart) and [interactive story mode](#recording-with-story-mode).
-- **Public proof:** [0.10-USDC mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e),
-  [redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194),
-  [Studio](https://thegraph.com/studio/subgraph/nota-entitlements), and
-  [recorded evidence](./deployments/base.json).
-- **Provenance:** [baseline](./BASELINE.md), [event contribution history](#event-contributions-and-source-snapshot),
-  and [AI assistance / available prompts](./documentation/AI_USAGE.md).
+- **Attacker** with the buyer's exact bundle → `403 BUYER_MISMATCH`, no transaction
+- **Buyer** with the same bundle → `201`, redeemed, `EntitlementRedeemed` emitted
+- **Buyer again** → `409 ALREADY_REDEEMED`, no second transaction
 
-**Boundaries:** genuine EOA signatures in `mock-wallet` mode, `humanVerified=false`;
-not World/AgentBook verification. The buyer is a programmatic client, not demonstrated
-LLM reasoning. The report is delivered **before redemption**, is not live Graph
-analytics, and is not a one-time download. Buyer matching is merchant-endpoint policy;
-the seller can bypass it. On-chain replay protection is **per redemption deployment**.
-No fulfillment or sponsor-qualification claim is made.
+<!-- TODO before submission: add a "Demo video" link as the first item of the proof line below. -->
+[Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
+
+Built during ETHOnline on top of the pre-existing Nota protocol ([BASELINE.md](./BASELINE.md)).
+Authentication is a mock wallet seam; World registration is pending — see
+[World integration status](#world-integration-status).
+
+## How the demo runs
+
+1. **Offer** — HTTP 402 with the seller-signed quote; the client verifies the bundle commitment and the line-item total before signing anything.
+2. **Payment** — EIP-3009 authorization; the facilitator relays and pays gas; the buyer sends no transaction and holds zero ETH on the fork.
+3. **Entitlement** — the buyer signs an access challenge and receives the report; after a server restart it recovers the same bundle without paying again.
+4. **Attacker** — B presents A's bundle and is rejected at the buyer check, before any transaction.
+5. **Redemption** — A redeems once through a seller-submitted transaction; A's fresh retry is rejected by the endpoint, with no second transaction.
+6. **Record** — prints the links and Graph query for the separately recorded mainnet purchase, whose settlement and redemption the index joins by `purchaseRef`.
+
+```sh
+npm run demo:connected -- --story   # disposable Base fork; needs exported BASE_RPC_URL
+npm run demo:redemption             # local chain only; no RPC
+```
 
 ## Contents
 
 - [Quickstart](#quickstart)
-- [Demo outcomes](#demo-outcomes-and-enforcement)
-- [Architecture at a glance](#architecture-at-a-glance)
-- [Contract responsibilities](#contract-responsibilities)
-- [Continuity boundary](#continuity-boundary)
-- [Base mainnet dependencies](#base-mainnet-dependencies)
-- [x402 settlement adapter](#x402-settlement-adapter)
-- [Entitlement redemption](#entitlement-redemption)
-- [References, events, and replay protection](#references-events-and-replay-protection)
-- [Deployment](#deployment)
-- [Backend architecture](#backend-architecture)
-- [Public evidence indexing with The Graph](#public-evidence-indexing-with-the-graph)
+- [Demo outcomes and enforcement](#demo-outcomes-and-enforcement)
+- [Architecture](#architecture-at-a-glance)
+- [Continuity boundary and deployments](#continuity-boundary)
+- [Public evidence with The Graph](#public-evidence-indexing-with-the-graph)
 - [Trust boundaries and limitations](#trust-boundaries-and-limitations)
-- [Development](#development)
-- [World integration status](#world-integration-status)
+- [World integration and sponsor boundaries](#world-integration-status)
 
 ## Quickstart
 
@@ -172,7 +174,7 @@ A reference can be paid through either the original store or an accepted adapter
 then redeemed through the same entitlement contract. Redemption neither charges
 the buyer again nor consumes the registry reference a second time.
 
-## Contract responsibilities
+### Contract responsibilities
 
 | Component | Origin | Responsibility | Relevant state / output |
 | --- | --- | --- | --- |
@@ -188,7 +190,7 @@ successful adapter settlements distribute the gross payment within the same
 transaction. Tokens accidentally sent to these contracts are not supported deposits
 and have no recovery mechanism.
 
-### Minimal interfaces, not copied protocol code
+#### Minimal interfaces, not copied protocol code
 
 [`src/interfaces/`](./src/interfaces) contains ABI boundaries to the existing
 deployments, not vendored Nota implementations:
@@ -203,101 +205,28 @@ deployments, not vendored Nota implementations:
 Local Solidity mocks are test fixtures only. Production integration targets the
 deployed ABI; Base fork tests check compatibility with the real contracts.
 
-## Continuity boundary
-
-The receipt protocol predates ETHOnline 2026. Its baseline is [`notaxyz/contracts@238cb210`](https://github.com/notaxyz/contracts/tree/238cb210e1342892c122b794563b1db99bd4b891), including seller-signed EIP-712 quotes, USDC settlement, `ReceiptPurchasedV2`, and global one-time purchase-reference consumption.
-
-[`BASELINE.md`](./BASELINE.md) records the timestamped boundary, deployed addresses, and the work introduced here. This repository does not vendor or modify Nota's existing contracts.
-
-### Event contributions and source snapshot
-
-History below comes from this repository's Git log. The last feature commit before
-the documentation restructure is [`14864c8`](https://github.com/notaxyz/entitlements/commit/14864c8a32c7aba5ccccf02fd385797a3e0a5ef5)
-(2026-09-13); story-mode HTTP route logging and the documentation restructure followed
-the same day. The commit named in the ETHGlobal submission is the submitted snapshot;
-it is not the older contract-deployment commit.
-
-| Git date | Contribution | Evidence commit(s) |
-| --- | --- | --- |
-| 2026-09-06 | Baseline record, Foundry scaffold, redemption, tests, trust boundaries, pinned CI formatter | `761f165`, `785c4c9`, `564fb57`, `51cf9ab`, `632244e`, `c3f772d` |
-| 2026-09-07–09 | EIP-3009 adapter, ERC-1271 buyers, accepted consumers, quote-bound nonce, client/facilitator/resource server, access authentication, trust checks, quote persistence | `e340f92`, `ac398fd`, `a4809ad`, `b55df07`, `8f3bbce`, `5df499a`, `ba1ca30`, `90e7f23`, `7105fe3`, `1d843d2`, `a3a6742` |
-| 2026-09-10 | Buyer-bound redemption endpoint, persistence/order checks, connected fork demo | `32ae8eb`, `12768cb`, `082b752`, `88e9b16` |
-| 2026-09-11 | Graph mappings and preflight preparation; buyer-generated checkout | `6febc41`, `8cc0b37`, `d618b3d` |
-| 2026-09-12 | Recorded Base deployments, Studio configuration/ABI fix/verification, live mode, preflight and public demo evidence | `8dae0e7`, `7c116cf`, `5e9d14b`, `5ddd34d`, `554da3d`, `5b60732`, `76eb742` |
-| 2026-09-13 | Six-act story presenter, cancellation handling and tests; story HTTP route logging; documentation restructure | `14864c8` and later commits |
-
-Inspect with `git log --reverse --stat` or `git show <commit>`. Dates are the
-commit-local dates Git records (the author's timezone varies between +0330, +0200
-and +0300), not independent proof of when every line was authored. The contract
-deployment record pins `d618b3d`; later live-demo and story work is **not** attributed
-to that older deployment commit. [BASELINE.md](./BASELINE.md) remains unchanged as
-historical evidence, distinct from this current contribution summary.
-
-## Base mainnet dependencies
-
-| Contract | Address |
-| --- | --- |
-| `NotaReceiptStore` | [`0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88`](https://basescan.org/address/0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88) |
-| `PurchaseRefRegistry` | [`0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991`](https://basescan.org/address/0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991) |
-| USDC | [`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`](https://basescan.org/address/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) |
-
-Both constructors discover the purchase-reference registry from the receipt store;
-the adapter also discovers the settlement token there. Redemption additionally takes
-the fixed list of accepted settlement consumers.
-
-### New Base mainnet deployments
-
-The two new contracts were deployed on **2026-09-11** from commit
-`d618b3dabcc2aa861ac0350ab728f5e6ba8b56c6`. Full transaction hashes, block hashes,
-UTC timestamps, constructor arguments, compiler settings, and bytecode hashes are
-recorded in [`deployments/base.json`](./deployments/base.json), using the field
-conventions of the existing contracts repository. The original `BASELINE.md` is unchanged.
-
-| Contract | Verified address | Deployment block |
-| --- | --- | --- |
-| `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) | [51,184,074](https://basescan.org/tx/0xd305282b6ea7d7a5efbf3000f987652a01b858b6be5c63207902e2ae1c72d984) |
-| `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) | [51,184,221](https://basescan.org/tx/0x4a53b7d49bf748fb0f2b389cc19e8e8fdfc6888d6145f46d33766f4bd846a3da) |
-
-The registry owner authorized the adapter in [transaction `0xe4bd8708…632d7f`](https://basescan.org/tx/0xe4bd870886def028ea45a0aed2c319f327dd23324b7c389eec04490b1f632d7f)
-at block **51,184,168**. RPC checks confirmed both contracts' store/registry wiring,
-the adapter's USDC address, and redemption's fixed accepted set of **store + adapter**.
-Both creation transactions match the local compiled artifacts plus the recorded
-constructor arguments. Source verification is not a security audit.
-
-The deployment snapshot above predates the **2026-09-12 public purchase and redemption**.
-Both manifests now contain that demo and its Studio event-verification record. Studio
-publication is not decentralized-network publication; World verification is still absent.
-Test fixtures deploy local instances; their transactions are not public-chain evidence.
-
-## x402 settlement adapter
+### x402 settlement adapter
 
 The adapter validates seller quotes through the existing store, binds the buyer's
 EIP-3009 authorization to that exact quote, consumes the reference in the registry,
 and distributes USDC atomically. The facilitator sends the transaction and pays gas.
 See [call sequence, accounting and signature boundaries](./documentation/ARCHITECTURE.md#x402-settlement-adapter).
 
-## Entitlement redemption
+### Entitlement redemption
 
 The contract requires the listing seller, consumption by an accepted settlement
 module, and an unredeemed reference. It does not authenticate the buyer. The endpoint
 adds buyer matching and verifies settlement against the merchant's saved order.
 See [contract checks and endpoint sequence](./documentation/ARCHITECTURE.md#entitlement-redemption).
 
-## References, events, and replay protection
+### References, events, and replay protection
 
 Join either store or adapter settlements to redemption by `purchaseRef`, not
 module-local receipt IDs. The hash does not commit to listing ID; the endpoint checks
 listing separately. Replay state belongs to a specific redemption deployment.
 See [event identities, state transitions and nonce visibility](./documentation/ARCHITECTURE.md#references-events-and-replay-protection).
 
-## Deployment
-
-Both new contracts and registry authorization are already recorded above. Deployment
-order is adapter → registry authorization → redemption with adapter accepted.
-Do not redeploy to record the demo. [Operator procedures](./documentation/OPERATIONS.md#deployment)
-explain both permission gates and why a new redemption deployment changes replay scope.
-
-## Backend architecture
+### Backend architecture
 
 | Module | Role | Relevant boundary |
 | --- | --- | --- |
@@ -331,7 +260,7 @@ Neither is a production buyer wallet vault. Authenticated paid access
 can still recover the merchant-held copy after a merchant restart. Buyer binding is
 to the wallet signing payment; World registration remains a separate pending check.
 
-### Persistent issued orders
+#### Persistent issued orders
 
 Both server entry points require **`QUOTE_STORE_PATH`**, set to the same absolute
 path on persistent storage (for example, an `issued-orders.json` file in a private
@@ -359,6 +288,86 @@ the repository does not implement or claim tested interoperability with x402's
 optional Signed Offers & Receipts extension. See [packages/README.md](./packages/README.md)
 for the paid-resource protocol.
 
+## Continuity boundary
+
+During the event we built the EIP-3009 settlement adapter, entitlement contract,
+buyer-authenticated backend, restart recovery, connected demo, and Graph event index
+over the [pre-existing Nota protocol](./BASELINE.md).
+
+**Provenance:** [baseline](./BASELINE.md), [event contribution history](#event-contributions-and-source-snapshot),
+and [AI assistance / available prompts](./documentation/AI_USAGE.md).
+
+The receipt protocol predates ETHOnline 2026. Its baseline is [`notaxyz/contracts@238cb210`](https://github.com/notaxyz/contracts/tree/238cb210e1342892c122b794563b1db99bd4b891), including seller-signed EIP-712 quotes, USDC settlement, `ReceiptPurchasedV2`, and global one-time purchase-reference consumption.
+
+[`BASELINE.md`](./BASELINE.md) records the timestamped boundary, deployed addresses, and the work introduced here. This repository does not vendor or modify Nota's existing contracts.
+
+### Event contributions and source snapshot
+
+History below comes from this repository's Git log. The last feature commit before
+the documentation restructure is [`14864c8`](https://github.com/notaxyz/entitlements/commit/14864c8a32c7aba5ccccf02fd385797a3e0a5ef5)
+(2026-09-13); story-mode HTTP route logging and the documentation restructure followed
+the same day. The commit named in the ETHGlobal submission is the submitted snapshot;
+it is not the older contract-deployment commit.
+
+| Git date | Contribution | Evidence commit(s) |
+| --- | --- | --- |
+| 2026-09-06 | Baseline record, Foundry scaffold, redemption, tests, trust boundaries, pinned CI formatter | `761f165`, `785c4c9`, `564fb57`, `51cf9ab`, `632244e`, `c3f772d` |
+| 2026-09-07–09 | EIP-3009 adapter, ERC-1271 buyers, accepted consumers, quote-bound nonce, client/facilitator/resource server, access authentication, trust checks, quote persistence | `e340f92`, `ac398fd`, `a4809ad`, `b55df07`, `8f3bbce`, `5df499a`, `ba1ca30`, `90e7f23`, `7105fe3`, `1d843d2`, `a3a6742` |
+| 2026-09-10 | Buyer-bound redemption endpoint, persistence/order checks, connected fork demo | `32ae8eb`, `12768cb`, `082b752`, `88e9b16` |
+| 2026-09-11 | Graph mappings and preflight preparation; buyer-generated checkout | `6febc41`, `8cc0b37`, `d618b3d` |
+| 2026-09-12 | Recorded Base deployments, Studio configuration/ABI fix/verification, live mode, preflight and public demo evidence | `8dae0e7`, `7c116cf`, `5e9d14b`, `5ddd34d`, `554da3d`, `5b60732`, `76eb742` |
+| 2026-09-13 | Six-act story presenter, cancellation handling and tests; story HTTP route logging; documentation restructure | `14864c8` and later commits |
+
+Inspect with `git log --reverse --stat` or `git show <commit>`. Dates are the
+commit-local dates Git records (the author's timezone varies between +0330, +0200
+and +0300), not independent proof of when every line was authored. The contract
+deployment record pins `d618b3d`; later live-demo and story work is **not** attributed
+to that older deployment commit. [BASELINE.md](./BASELINE.md) remains unchanged as
+historical evidence, distinct from this current contribution summary.
+
+### Base mainnet dependencies
+
+| Contract | Address |
+| --- | --- |
+| `NotaReceiptStore` | [`0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88`](https://basescan.org/address/0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88) |
+| `PurchaseRefRegistry` | [`0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991`](https://basescan.org/address/0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991) |
+| USDC | [`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`](https://basescan.org/address/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) |
+
+Both constructors discover the purchase-reference registry from the receipt store;
+the adapter also discovers the settlement token there. Redemption additionally takes
+the fixed list of accepted settlement consumers.
+
+#### New Base mainnet deployments
+
+The two new contracts were deployed on **2026-09-11** from commit
+`d618b3dabcc2aa861ac0350ab728f5e6ba8b56c6`. Full transaction hashes, block hashes,
+UTC timestamps, constructor arguments, compiler settings, and bytecode hashes are
+recorded in [`deployments/base.json`](./deployments/base.json), using the field
+conventions of the existing contracts repository. The original `BASELINE.md` is unchanged.
+
+| Contract | Verified address | Deployment block |
+| --- | --- | --- |
+| `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) | [51,184,074](https://basescan.org/tx/0xd305282b6ea7d7a5efbf3000f987652a01b858b6be5c63207902e2ae1c72d984) |
+| `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) | [51,184,221](https://basescan.org/tx/0x4a53b7d49bf748fb0f2b389cc19e8e8fdfc6888d6145f46d33766f4bd846a3da) |
+
+The registry owner authorized the adapter in [transaction `0xe4bd8708…632d7f`](https://basescan.org/tx/0xe4bd870886def028ea45a0aed2c319f327dd23324b7c389eec04490b1f632d7f)
+at block **51,184,168**. RPC checks confirmed both contracts' store/registry wiring,
+the adapter's USDC address, and redemption's fixed accepted set of **store + adapter**.
+Both creation transactions match the local compiled artifacts plus the recorded
+constructor arguments. Source verification is not a security audit.
+
+The deployment snapshot above predates the **2026-09-12 public purchase and redemption**.
+Both manifests now contain that demo and its Studio event-verification record. Studio
+publication is not decentralized-network publication; World verification is still absent.
+Test fixtures deploy local instances; their transactions are not public-chain evidence.
+
+### Deployment
+
+Both new contracts and registry authorization are already recorded above. Deployment
+order is adapter → registry authorization → redemption with adapter accepted.
+Do not redeploy to record the demo. [Operator procedures](./documentation/OPERATIONS.md#deployment)
+explain both permission gates and why a new redemption deployment changes replay scope.
+
 ## Public evidence indexing with The Graph
 
 **Recorded status, reviewed 2026-09-13:** Studio deployed; mainnet settlement and
@@ -377,6 +386,39 @@ Its settlement at block **51,220,814**, log **247**, and redemption at block
 **51,220,820**, log **702**, were checked at indexed block **51,221,518**.
 This documents one purchase, not current availability, completeness or a fresh query.
 
+### Query the recorded purchase
+
+Paste this into the **Playground** tab of the [Studio subgraph](https://thegraph.com/studio/subgraph/nota-entitlements),
+or POST it to the query endpoint above. It is the query story mode prints in Act 6,
+plus index health (`_meta`):
+
+```graphql
+{
+  _meta { deployment hasIndexingErrors block { number } }
+  purchases(where: { purchaseRef: "0xb3368376783682607e36f2c62fc198957bddea962dd42f20af05a0ffd57e6b94" }) {
+    purchaseRef buyer seller amount metadataHash
+    settlements { kind emitter transactionHash blockNumber }
+    redemptions { redemptionContract transactionHash redeemedAt }
+  }
+}
+```
+
+A run on **2026-09-13** (deployment `QmQ4y2Co…NnQp`, index at block 51,248,802,
+`hasIndexingErrors: false`) returned one purchase:
+
+| Field | Returned | Meaning |
+| --- | --- | --- |
+| `amount` | `100000` | 0.10 USDC (six decimals) |
+| `buyer` | `0x41f14bbee2936c3cb21fda7f56f66972bb4fa1d4` | Buyer A's wallet |
+| `seller` | `0x6207cadc1a3af0e1a2ff0f7fdb80793e84596fde` | Listing seller, which submits redemptions |
+| `settlements` | One `X402_ADAPTER` settlement from `0x59d3…ddc8`, block 51,220,814, tx [`0xa5ad…384e`](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) | Paid through the new adapter |
+| `redemptions` | One from `0xde4f…3882`, tx [`0x5920…5194`](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194), `redeemedAt` `1789230987` (2026-09-12 16:36:27 UTC) | Redeemed once on this deployment |
+
+The single redemption row matches the demo: the replay attempt was rejected by the
+endpoint and sent no transaction. The fork walkthrough's own purchase (10 test USDC)
+exists only on the local fork and never appears here. This is public evidence to
+inspect; the application itself does not read the index.
+
 The earlier snapshot at **51,208,878** still correctly records one baseline store
 settlement, zero adapter settlements and zero redemptions. Its original fields,
 block hashes and timestamps are preserved. [Historical snapshots and index operations](./documentation/INDEXING.md)
@@ -390,6 +432,27 @@ published to the decentralized network. World registration and deployment-tool
 advisory resolution remain unverified. No free-gas or free-query claim is made.
 
 ## Trust boundaries and limitations
+
+**Scope of the demonstration.** These qualify the summary at the top of this README:
+
+- **Authentication:** genuine EOA signatures in `mock-wallet` mode, `humanVerified=false`;
+  not World/AgentBook verification. "The wallet that paid" means wallet control, not a
+  verified agent or human identity.
+- **Buyer:** a programmatic client, not demonstrated LLM reasoning.
+- **Content:** the concrete demo buys an **illustrative Base USDC flows report**. The
+  report is delivered **before redemption**, is not live Graph analytics, and is not a
+  one-time download.
+- **Who can spend it:** buyer matching is merchant-endpoint policy; the seller can bypass
+  it. The bundle is shared with the merchant and its RPC at checkout and published in
+  redemption calldata; it is not buyer-exclusive.
+- **Once:** on-chain replay protection is **per redemption deployment**. The demo's
+  replay is rejected by the endpoint (HTTP 409) before any transaction, not by an
+  on-chain revert.
+- **Record:** story mode prints the Graph query; it does not execute it, and the fork
+  purchase never appears in the public index.
+- No fulfillment or sponsor-qualification claim is made.
+
+**Protocol and operational boundaries:**
 
 - **Registry authorization and redemption acceptance are different gates.** The
   registry owner authorizes an adapter to consume new references. The redemption
