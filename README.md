@@ -23,7 +23,9 @@ redemption deployment.
 [Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
 
 Built during ETHOnline on top of the pre-existing Nota protocol ([BASELINE.md](./BASELINE.md)).
-Authentication is a mock wallet seam; World registration is pending — see
+The demo video runs on a local Base fork; the links above are a separate, real Base
+mainnet purchase ([fork vs. real](#fork-walkthrough-and-real-purchase)). Authentication
+is a mock wallet seam; World registration is pending — see
 [World integration status](#world-integration-status).
 
 ## How the demo runs
@@ -39,6 +41,23 @@ Authentication is a mock wallet seam; World registration is pending — see
 npm run demo:connected -- --story   # disposable Base fork; needs exported BASE_RPC_URL
 npm run demo:redemption             # local chain only; no RPC
 ```
+
+### Fork walkthrough and real purchase
+
+**The demo video is recorded on a disposable Base fork.** The real deployed Nota
+store, registry and USDC are forked locally, the two new contracts are deployed
+locally, the buyer pays 10 test USDC, and every transaction hash in the walkthrough
+belongs to the fork. Nothing in the video spends real funds.
+
+**The same flow also ran once for real on Base mainnet**, on 2026-09-12: listing 2,
+0.10 USDC, the same three outcomes (403 / 201 / 409), and no transaction sent by the
+buyer. See the [settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e),
+the [redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194),
+the [recorded evidence](./deployments/base.json) and the
+[subgraph query](#query-the-recorded-purchase). That run was recorded before story
+mode was committed (`14864c8`), so it has no narration. Act 6 of the fork walkthrough
+switches to it explicitly. The recorded evidence blocks another paid run; see
+[Connected demo on deployed Base mainnet contracts](#connected-demo-on-deployed-base-mainnet-contracts).
 
 ## Contents
 
