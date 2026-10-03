@@ -8,7 +8,7 @@
   "deployer": "0x628D526F6ded53eBdE597888541e8F33F42f5E91",
   "settlementToken": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
   "settlementTokenSymbol": "USDC",
-  "notes": "No client flow runs against this deployment yet: no facilitator, resource server, purchase or redemption has been exercised on Arbitrum Sepolia.",
+  "notes": "One purchase-to-redemption has been exercised against this deployment with npm run demo:arb-sepolia and the three manually configured services (facilitator, resource server, redemption server). Settlement 0x7b03f5038eb99896f56f89b05ab806a65784c161f27129e95298af21d504679f (adapter receipt 1, purchaseRef 0xe553e229584ef74f9b0f82ff5c98ae933602e4c61f555d1f4fcc472229e8f26e); redemption 0x47d4782e216f13ba0c9531e469f726c4677f51c322f2f711620d3942873744e7 (redeemedAt 1791037157). Attempts: 403 BUYER_MISMATCH (step 6), 201 REDEEMED (step 7), 409 ALREADY_REDEEMED (step 5). Console captures are in runs/.",
   "compiler": {
     "version": "0.8.24+commit.e11b9ed9",
     "optimizerEnabled": true,
@@ -94,7 +94,7 @@
   },
   "scope": {
     "testnet": true,
-    "publicPurchaseAndRedemptionDemoRecorded": false,
+    "publicPurchaseAndRedemptionDemoRecorded": true,
     "subgraphPublished": false,
     "worldRegistrationVerified": false,
     "note": "Testnet deployment only. Deployment and source verification are not proof of live application integration, a security audit, fulfillment, or human-backed agent authentication. Registry authorization is a checked snapshot and can be revoked by its owner."

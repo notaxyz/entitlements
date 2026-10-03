@@ -194,15 +194,14 @@ Supply secrets privately through the environment; never paste key values into co
 | --- | --- | --- | --- |
 | [Facilitator](./facilitator/src/server.ts): `npm run facilitator` | `RPC_URL` (default localhost:8545) | `FACILITATOR_PRIVATE_KEY` | Required `NOTA_X402_ADAPTER`; optional `CHAIN_ID` (8453), `FACILITATOR_PORT` (4021) |
 | [Resource server](./resource-server/src/server.ts): `npm run resource-server` | `RPC_URL` (default localhost:8545) | `SELLER_PRIVATE_KEY` (quote signing) | `QUOTE_STORE_PATH`, `NOTA_RECEIPT_STORE`, `SETTLEMENT_TOKEN`, `PURCHASE_REF_REGISTRY`, `NOTA_X402_ADAPTER`; optional `CHAIN_ID`, `LISTING_ID`, `FROM_BLOCK`, `RESOURCE_PORT`, `RESOURCE_BASE_URL`, `FACILITATOR_URL` |
-| [Redemption server](./resource-server/src/redemption/server.ts): `npm run redemption-server` | `BASE_RPC_URL` (default localhost:8545) | `SELLER_PRIVATE_KEY` (seller transactions) | `QUOTE_STORE_PATH`, `AGENT_AUTH_MODE=mock`, `ENTITLEMENT_REDEMPTION`, `NOTA_RECEIPT_STORE`, `REDEMPTION_ADAPTERS`, `REDEMPTION_PORT`, `REDEMPTION_BASE_URL`, `REDEMPTION_CONFIRMATIONS`; refuses `NODE_ENV=production` |
+| [Redemption server](./resource-server/src/redemption/server.ts): `npm run redemption-server` | `RPC_URL` (default localhost:8545) | `SELLER_PRIVATE_KEY` (seller transactions) | `QUOTE_STORE_PATH`, `AGENT_AUTH_MODE=mock`, `ENTITLEMENT_REDEMPTION`, `NOTA_RECEIPT_STORE`, `REDEMPTION_ADAPTERS`; optional `CHAIN_ID` (8453), `REDEMPTION_PORT`, `REDEMPTION_BASE_URL`, `REDEMPTION_CONFIRMATIONS`; refuses `NODE_ENV=production` |
 | [Connected live demo / preflight](./e2e/src/live-config.ts) | `BASE_RPC_URL` (HTTPS required) | `SELLER_PRIVATE_KEY`, `BUYER_PRIVATE_KEY`, optional `RELAYER_PRIVATE_KEY` | `LIVE_DEMO_USDC_AMOUNT`, `LIVE_DEMO_STATE_DIR`; manifest addresses, not manual-service address variables |
 
 `RELAYER_PRIVATE_KEY` is **not** read by the standalone facilitator;
 `FACILITATOR_PRIVATE_KEY` is **not** read by the connected live demo. The fork demo
-creates test keys itself and uses `BASE_RPC_URL` only as its fork source. For manual
-services on one local Base fork, configure both RPC variables to that fork, not one
-to mainnet. The same seller may sign quotes and submit redemptions, but only one
-redemption writer may submit with that key.
+creates test keys itself and uses `BASE_RPC_URL` only as its fork source. The same
+seller may sign quotes and submit redemptions, but only one redemption writer may
+submit with that key.
 
 After securely configuring the appropriate environment for each terminal:
 

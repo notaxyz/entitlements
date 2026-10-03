@@ -1,0 +1,37 @@
+arzam@Farzams-MacBook-Pro entitlements % read -s BUYER_PRIVATE_KEY && export BUYER_PRIVATE_KEY && RPC_URL=https://sepolia-rollup.arbitrum.io/rpc CHAIN_ID=421614 RESOURCE_URL=http://127.0.0.1:4020/reports/arbitrum-sepolia-sample-report REDEMPTION_BASE_URL=http://127.0.0.1:4022 NOTA_RECEIPT_STORE=0x6b13e2077c84e1326111acBbb618E028723e2EA2 SETTLEMENT_TOKEN=0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d PURCHASE_REF_REGISTRY=0x32aAeC7768adBBFD65C776b129616b8727d0c8bd NOTA_X402_ADAPTER=0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8 ENTITLEMENT_REDEMPTION=0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE MAX_AMOUNT=1000000 npm run demo:arb-sepolia
+
+> demo:arb-sepolia
+> tsx packages/e2e/scripts/arb-sepolia-demo.ts
+
+chain 421614  buyer 0x2Ec0888751f2F82a12F60a638A73780e2D70f5f8
+store 0x6b13e2077c84e1326111acBbb618E028723e2EA2
+adapter 0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8
+redemption 0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE
+
+1. purchase
+[agent] requesting http://127.0.0.1:4020/reports/arbitrum-sepolia-sample-report as 0x2Ec0888751f2F82a12F60a638A73780e2D70f5f8 
+[agent] verified purchase: Arbitrum Sepolia sample report (illustrative testnet content) for 250000 base units across 2 line(s) 
+[agent] signed an authorization for 250000 to adapter 0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8 
+[agent] facilitator settled in 0x7b03f5038eb99896f56f89b05ab806a65784c161f27129e95298af21d504679f, receipt 1 
+   settled in 0x7b03f5038eb99896f56f89b05ab806a65784c161f27129e95298af21d504679f
+   purchaseRef 0xe553e229584ef74f9b0f82ff5c98ae933602e4c61f555d1f4fcc472229e8f26e
+   resource: http://127.0.0.1:4020/reports/arbitrum-sepolia-sample-report
+
+2. redemption attempt by a different wallet, with the correct bundle
+   HTTP 403  BUYER_MISMATCH  step 6
+   rejected, and no transaction was sent
+
+3. redemption by the paying wallet
+   HTTP 201
+   purchaseRef  0xe553e229584ef74f9b0f82ff5c98ae933602e4c61f555d1f4fcc472229e8f26e
+   redeemed in  0x47d4782e216f13ba0c9531e469f726c4677f51c322f2f711620d3942873744e7
+   redeemedAt   1791037157
+   EntitlementRedeemed emitted
+
+4. the same wallet redeeming the same entitlement again
+   HTTP 409  ALREADY_REDEEMED  step 5
+   rejected, and no second transaction was sent
+
+PASS. Paid once, redeemed once, by the paying wallet only.
+redemption tx: 0x47d4782e216f13ba0c9531e469f726c4677f51c322f2f711620d3942873744e7
+farzam@Farzams-MacBook-Pro entitlements % 

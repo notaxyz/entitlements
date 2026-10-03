@@ -1,0 +1,12 @@
+farzam@Farzams-MacBook-Pro entitlements % read -s SELLER_PRIVATE_KEY && export SELLER_PRIVATE_KEY && RPC_URL=https://sepolia-rollup.arbitrum.io/rpc CHAIN_ID=421614 AGENT_AUTH_MODE=mock QUOTE_STORE_PATH="$PWD/private-data/arb-sepolia/issued-orders.json" NOTA_RECEIPT_STORE=0x6b13e2077c84e1326111acBbb618E028723e2EA2 ENTITLEMENT_REDEMPTION=0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE REDEMPTION_ADAPTERS=0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8 npm run redemption-server
+
+> redemption-server
+> tsx packages/resource-server/src/redemption/server.ts
+
+{"event":"redemption.started","port":4022,"authentication":"mock-wallet","humanVerified":false}
+{"event":"redemption.rejected","requestId":"d4036dd3-cefd-4681-8490-7bcb55b8ca8c","step":6,"code":"BUYER_MISMATCH"}
+{"event":"redemption.accepted","requestId":"33df33b5-f02a-4bc7-a290-877d5beb44c0","step":7,"code":"REDEEMED"}
+{"event":"redemption.rejected","requestId":"5d190b09-5aaa-4694-8ba3-203a00f21f1e","step":5,"code":"ALREADY_REDEEMED"}
+
+
+

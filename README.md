@@ -68,6 +68,7 @@ switches to it explicitly. The recorded evidence blocks another paid run; see
 - [Public evidence with The Graph](#public-evidence-indexing-with-the-graph)
 - [Trust boundaries and limitations](#trust-boundaries-and-limitations)
 - [Deployments](#deployments)
+- [Arbitrum Sepolia demo: verify or reproduce](./documentation/ARBITRUM_SEPOLIA_DEMO.md)
 - [World integration status](#world-integration-status)
 
 ## Quickstart
@@ -399,6 +400,8 @@ explain both permission gates and why a new redemption deployment changes replay
 The Arbitrum Sepolia contracts build on the upstream testnet store
 `0x6b13e2077c84e1326111acBbb618E028723e2EA2` and its registry. Transactions, wiring checks
 and bytecode hashes are recorded in [`deployments/arbitrum-sepolia.json`](./deployments/arbitrum-sepolia.json).
+
+Verify or reproduce the recorded Arbitrum Sepolia purchase and redemption: [documentation/ARBITRUM_SEPOLIA_DEMO.md](./documentation/ARBITRUM_SEPOLIA_DEMO.md).
 
 ## Public evidence indexing with The Graph
 

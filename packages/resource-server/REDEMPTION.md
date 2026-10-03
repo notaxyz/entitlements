@@ -58,7 +58,8 @@ arguments. The script does not automatically load `.env`. Set:
 | --- | --- |
 | `QUOTE_STORE_PATH` | Required absolute path to the merchant's issued-order file; same path as the resource server |
 | `AGENT_AUTH_MODE=mock` | Explicit wallet-only development authentication |
-| `BASE_RPC_URL` | Trusted Base RPC; defaults to local `127.0.0.1:8545` |
+| `RPC_URL` | Trusted RPC for the target chain; defaults to local `127.0.0.1:8545`. The startup log reports the chain ID it connected to |
+| `CHAIN_ID` | Target chain ID, default `8453`; startup refuses an RPC on a different chain |
 | `NOTA_RECEIPT_STORE` | Trusted receipt store address |
 | `ENTITLEMENT_REDEMPTION` | Existing redemption deployment |
 | `REDEMPTION_ADAPTERS` | Comma-separated trusted adapter emitters; empty allows store only |
