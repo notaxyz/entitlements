@@ -31,4 +31,23 @@ export const CATALOG: Record<string, CatalogEntry> = {
       note: "Paid content. Returned only after a settled Nota receipt is found on chain.",
     },
   },
+  "arbitrum-sepolia-sample-report": {
+    id: "arbitrum-sepolia-sample-report",
+    description: "Arbitrum Sepolia sample report (illustrative testnet content)",
+    amount: 250_000n,
+    items: [
+      {
+        sku: "report-arbitrum-sepolia-sample",
+        name: "Arbitrum Sepolia sample report",
+        quantity: 1,
+        unitAmount: "200000",
+      },
+      { sku: "csv-appendix", name: "CSV appendix", quantity: 2, unitAmount: "25000" },
+    ],
+    body: {
+      report: "arbitrum-sepolia-sample-report",
+      sampleValues: { transfers: 1_234, uniqueWallets: 56 },
+      note: "Illustrative testnet content. Sample values, not market data. Returned only after a settled Nota receipt is found on chain.",
+    },
+  },
 };

@@ -1,7 +1,7 @@
 import type { Hex } from "viem";
 import { MockAgentAuthorizer } from "./authorizer.js";
 import { createRedemptionApp } from "./app.js";
-import { ViemRedemptionChain } from "./chain.js";
+import { ChainIdMismatchError, ViemRedemptionChain } from "./chain.js";
 import { requireAddress } from "./types.js";
 import { configuredQuoteStore } from "../store.js";
 
@@ -24,8 +24,10 @@ async function main() {
   )
     throw new Error("Use HTTPS outside localhost");
   const redemption = requireAddress(process.env.ENTITLEMENT_REDEMPTION);
+  const chainId = Number(process.env.CHAIN_ID ?? 8453);
   const chain = await ViemRedemptionChain.connect({
-    rpcUrl: process.env.BASE_RPC_URL ?? "http://127.0.0.1:8545",
+    rpcUrl: process.env.RPC_URL ?? "http://127.0.0.1:8545",
+    chainId,
     store: requireAddress(process.env.NOTA_RECEIPT_STORE),
     redemption,
     adapters: (process.env.REDEMPTION_ADAPTERS ?? "")
@@ -37,7 +39,7 @@ async function main() {
   });
   const authorizer = new MockAgentAuthorizer({
     resource: new URL("/v1/redemptions", baseUrl).href,
-    chainId: 8453,
+    chainId,
     redemptionContract: redemption,
   });
   createRedemptionApp({
@@ -53,6 +55,7 @@ async function main() {
         JSON.stringify({
           event: "redemption.started",
           port,
+          chainId: chain.connectedChainId,
           authentication: "mock-wallet",
           humanVerified: false,
         }),
@@ -61,10 +64,23 @@ async function main() {
   );
 }
 
-main().catch(() => {
+main().catch((error: unknown) => {
+  // Two chain IDs are safe to print; report them so a wrong RPC_URL or CHAIN_ID is self-evident.
+  if (error instanceof ChainIdMismatchError) {
+    console.error(
+      JSON.stringify({
+        event: "redemption.startup_failed",
+        code: "CHAIN_ID_MISMATCH",
+        expectedChainId: error.expectedChainId,
+        rpcChainId: error.rpcChainId,
+      }),
+    );
+    process.exitCode = 1;
+    return;
+  }
   // Configuration/RPC exceptions can contain private keys, URLs with credentials, or calldata.
   console.error(
-    "Redemption startup failed. Check QUOTE_STORE_PATH, explicit mock mode, non-production environment, and Base deployment configuration. No sensitive diagnostic data was logged.",
+    "Redemption startup failed. Check QUOTE_STORE_PATH, explicit mock mode, non-production environment, RPC_URL and CHAIN_ID (default 8453), and deployment configuration. No sensitive diagnostic data was logged.",
   );
   process.exitCode = 1;
 });

@@ -102,6 +102,8 @@ export interface ViemRedemptionConfig {
   /** Public hash only; never pass calldata or a preimage bundle to a logger. */
   onTransactionSubmitted?: (hash: Hex) => void;
   rpcUrl: string;
+  /** Defaults to Base mainnet (8453); startup refuses an RPC on any other chain. */
+  chainId?: number;
   store: Address;
   redemption: Address;
   adapters: Address[];
@@ -109,9 +111,22 @@ export interface ViemRedemptionConfig {
   confirmations?: number;
 }
 
+/** The RPC is on a different chain than CHAIN_ID asked for. Carries only the two chain IDs. */
+export class ChainIdMismatchError extends Error {
+  constructor(
+    readonly expectedChainId: number,
+    readonly rpcChainId: number,
+  ) {
+    super(`CHAIN_ID is ${expectedChainId} but the RPC reports chain ${rpcChainId}`);
+    this.name = "ChainIdMismatchError";
+  }
+}
+
 /** Construct through connect(): validates deployment wiring before accepting requests. */
 export class ViemRedemptionChain implements RedemptionChain {
   readonly seller: Address;
+  /** Chain ID the RPC reported at connect(); set before any request is accepted. */
+  connectedChainId!: number;
   private readonly publicClient;
   private readonly walletClient;
   private registry!: Address;
@@ -125,7 +140,7 @@ export class ViemRedemptionChain implements RedemptionChain {
     this.confirmations = config.confirmations ?? 2;
     if (!Number.isSafeInteger(this.confirmations) || this.confirmations < 1)
       throw new Error("Invalid confirmations");
-    const chain = notaChain(8453, config.rpcUrl);
+    const chain = notaChain(config.chainId ?? 8453, config.rpcUrl);
     const account = privateKeyToAccount(config.sellerPrivateKey);
     this.seller = account.address;
     this.publicClient = createPublicClient({
@@ -148,8 +163,10 @@ export class ViemRedemptionChain implements RedemptionChain {
   }
 
   private async validateDeployment() {
-    if ((await this.publicClient.getChainId()) !== 8453)
-      throw new Error("Redemption requires Base chain ID 8453");
+    const expected = this.config.chainId ?? 8453;
+    this.connectedChainId = await this.publicClient.getChainId();
+    if (this.connectedChainId !== expected)
+      throw new ChainIdMismatchError(expected, this.connectedChainId);
     for (const address of [
       this.config.store,
       this.config.redemption,
