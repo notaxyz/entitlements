@@ -2,7 +2,7 @@
 
 [Project overview](../README.md) · [Prompt artifacts](./PROMPTS.md)
 
-Where and how AI tools were used during ETHOnline 2026, as far as this repository's
+Where and how AI tools were used in building this repository, as far as this repository's
 Git history establishes it (compiled 2026-09-13).
 
 ## Where AI was used
@@ -13,7 +13,7 @@ Git history establishes it (compiled 2026-09-13).
 | 2026-09-12 | Claude | Live-demo failure reporting and read-only preflight; recording the mainnet demo and Studio verification in the manifests | Trailers on `5b60732`, `76eb742`; live-demo files in `packages/e2e`, `package.json` (`demo:preflight`), both deployment manifests. The builder ran the transactions |
 | 2026-09-13 | OpenAI Codex | Story mode: awaitable step callbacks, six-act presenter, CLI wiring, tests and README | `14864c8`; `packages/e2e/{src,scripts,test}` story files. Driven by the [story-mode prompt](./PROMPTS.md) |
 | 2026-09-13 | Tool not recorded | Story-mode logging of known application HTTP routes and response statuses | `packages/e2e/src/{story.ts,fixture.ts,live-fixture.ts}` and story tests |
-| 2026-09-13 | OpenAI Codex, then Claude Code | Documentation restructure: judge-facing README, pages under `documentation/`, environment comments, and checking claims against source and both manifests | README, `packages/README.md`, `REDEMPTION.md`, SECURITY, WORLD_FEEDBACK, `.env.example`, `documentation/*`; no contract, manifest or script changes |
+| 2026-09-13 | OpenAI Codex, then Claude Code | Documentation restructure: README for external readers, pages under `documentation/`, environment comments, and checking claims against source and both manifests | README, `packages/README.md`, `REDEMPTION.md`, SECURITY, WORLD_FEEDBACK (since removed), `.env.example`, `documentation/*`; no contract, manifest or script changes |
 
 ## What the builder did
 

@@ -19,10 +19,10 @@ redemption deployment.
 - **Buyer** with the same bundle → `201`, redeemed, `EntitlementRedeemed` emitted
 - **Buyer again** → `409 ALREADY_REDEEMED`, no second transaction
 
-<!-- TODO: add a "Demo video" link after the showcase link once it has a public URL. -->
-[ETHGlobal showcase](https://ethglobal.com/showcase/nota-entitlements-88xhn) · [Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
+<!-- TODO: add a "Demo video" link once it has a public URL. -->
+[Mainnet settlement](https://basescan.org/tx/0xa5ad9c2e638590a3aa5ef29ca7d5fa99cd98d48f697640ae1b7e506f7473384e) · [Redemption](https://basescan.org/tx/0x59207b64629b4bff88e5198fc66045bb9bd1429dc3c6b7296f4a2d61a4905194) · [Subgraph](https://thegraph.com/studio/subgraph/nota-entitlements) · [Live run record](./deployments/base.json)
 
-Built during ETHOnline on top of the pre-existing Nota protocol ([BASELINE.md](./BASELINE.md)).
+Built on the Nota receipt protocol ([BASELINE.md](./BASELINE.md)).
 The demo video runs on a local Base fork; the settlement, redemption, subgraph and run-record
 links are a separate, real Base mainnet purchase ([fork vs. real](#fork-walkthrough-and-real-purchase)). Authentication
 is a mock wallet seam; World registration is pending — see
@@ -64,10 +64,11 @@ switches to it explicitly. The recorded evidence blocks another paid run; see
 - [Quickstart](#quickstart)
 - [Demo outcomes and enforcement](#demo-outcomes-and-enforcement)
 - [Architecture](#architecture-at-a-glance)
-- [Continuity boundary and deployments](#continuity-boundary)
+- [Scope of this repository](#scope-of-this-repository)
 - [Public evidence with The Graph](#public-evidence-indexing-with-the-graph)
 - [Trust boundaries and limitations](#trust-boundaries-and-limitations)
-- [World integration and sponsor boundaries](#world-integration-status)
+- [Deployments](#deployments)
+- [World integration status](#world-integration-status)
 
 ## Quickstart
 
@@ -94,7 +95,8 @@ Do not substitute latest dependency revisions.
 **Plain ZIP:** source archives omit submodule contents and project Git history.
 `npm ci` alone does not populate Solidity dependencies. Prefer a fresh Git clone
 above, outside your extracted directory, rather than initializing an unrelated Git
-history or guessing dependency versions. An archive is not Continuity history evidence.
+history or guessing dependency versions. An archive carries no Git history, so it cannot
+evidence when or by whom code was written.
 
 **Repeatable connected demo:** configure a trusted Base RPC in your shell/secret
 manager, then export it. TypeScript scripts do **not** load `.env` automatically.
@@ -307,26 +309,25 @@ the repository does not implement or claim tested interoperability with x402's
 optional Signed Offers & Receipts extension. See [packages/README.md](./packages/README.md)
 for the paid-resource protocol.
 
-## Continuity boundary
+## Scope of this repository
 
-During the event we built the EIP-3009 settlement adapter, entitlement contract,
+This repository adds the EIP-3009 settlement adapter, entitlement contract,
 buyer-authenticated backend, restart recovery, connected demo, and Graph event index
 over the [pre-existing Nota protocol](./BASELINE.md).
 
-**Provenance:** [baseline](./BASELINE.md), [event contribution history](#event-contributions-and-source-snapshot),
+**Provenance:** [baseline](./BASELINE.md), [commit history](#what-this-repository-adds),
 and [AI assistance / available prompts](./documentation/AI_USAGE.md).
 
-The receipt protocol predates ETHOnline 2026. Its baseline is [`notaxyz/contracts@238cb210`](https://github.com/notaxyz/contracts/tree/238cb210e1342892c122b794563b1db99bd4b891), including seller-signed EIP-712 quotes, USDC settlement, `ReceiptPurchasedV2`, and global one-time purchase-reference consumption.
+This layer builds on [`notaxyz/contracts@238cb210`](https://github.com/notaxyz/contracts/tree/238cb210e1342892c122b794563b1db99bd4b891), which provides seller-signed EIP-712 quotes, USDC settlement, `ReceiptPurchasedV2`, and global one-time purchase-reference consumption.
 
 [`BASELINE.md`](./BASELINE.md) records the timestamped boundary, deployed addresses, and the work introduced here. This repository does not vendor or modify Nota's existing contracts.
 
-### Event contributions and source snapshot
+### What this repository adds
 
 History below comes from this repository's Git log. The last feature commit before
 the documentation restructure is [`14864c8`](https://github.com/notaxyz/entitlements/commit/14864c8a32c7aba5ccccf02fd385797a3e0a5ef5)
 (2026-09-13); story-mode HTTP route logging and the documentation restructure followed
-the same day. The commit named in the ETHGlobal submission is the submitted snapshot;
-it is not the older contract-deployment commit.
+the same day.
 
 | Git date | Contribution | Evidence commit(s) |
 | --- | --- | --- |
@@ -341,8 +342,7 @@ Inspect with `git log --reverse --stat` or `git show <commit>`. Dates are the
 commit-local dates Git records (the author's timezone varies between +0330, +0200
 and +0300), not independent proof of when every line was authored. The contract
 deployment record pins `d618b3d`; later live-demo and story work is **not** attributed
-to that older deployment commit. [BASELINE.md](./BASELINE.md) remains unchanged as
-historical evidence, distinct from this current contribution summary.
+to that older deployment commit.
 
 ### Base mainnet dependencies
 
@@ -362,7 +362,7 @@ The two new contracts were deployed on **2026-09-11** from commit
 `d618b3dabcc2aa861ac0350ab728f5e6ba8b56c6`. Full transaction hashes, block hashes,
 UTC timestamps, constructor arguments, compiler settings, and bytecode hashes are
 recorded in [`deployments/base.json`](./deployments/base.json), using the field
-conventions of the existing contracts repository. The original `BASELINE.md` is unchanged.
+conventions of the existing contracts repository.
 
 | Contract | Verified address | Deployment block |
 | --- | --- | --- |
@@ -386,6 +386,17 @@ Both new contracts and registry authorization are already recorded above. Deploy
 order is adapter → registry authorization → redemption with adapter accepted.
 Do not redeploy to record the demo. [Operator procedures](./documentation/OPERATIONS.md#deployment)
 explain both permission gates and why a new redemption deployment changes replay scope.
+
+## Deployments
+
+| Network | Contract | Address | Deployed |
+| --- | --- | --- | --- |
+| Base mainnet | `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) | September 2026 |
+| Base mainnet | `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) | September 2026 |
+| Arbitrum Sepolia | `NotaX402Settlement` | **TODO: address pending** ([Arbiscan Sepolia](https://sepolia.arbiscan.io/)) | Pending |
+| Arbitrum Sepolia | `EntitlementRedemption` | **TODO: address pending** ([Arbiscan Sepolia](https://sepolia.arbiscan.io/)) | Pending |
+
+<!-- TODO: fill in the Arbitrum Sepolia addresses once deployed; do not copy Base addresses. -->
 
 ## Public evidence indexing with The Graph
 
@@ -469,7 +480,7 @@ advisory resolution remain unverified. No free-gas or free-query claim is made.
   on-chain revert.
 - **Record:** story mode prints the Graph query; it does not execute it, and the fork
   purchase never appears in the public index.
-- No fulfillment or sponsor-qualification claim is made.
+- No claim is made that redemption constitutes fulfillment.
 
 **Protocol and operational boundaries:**
 
@@ -495,6 +506,13 @@ advisory resolution remain unverified. No free-gas or free-query claim is made.
   blindly. RPC trust, confirmation policy, and reorg risk still apply.
 - **Do not overclaim identity.** Mock signatures prove wallet control, not a verified
   or unique human. World status is tracked separately below.
+- **World ID and AgentBook are not implemented.** The mock authorization seam exists;
+  `WorldAgentKitAuthorizer`, AgentBook registration/resolution and World Sandbox testing
+  do not. Which AgentBook registry and network (World Chain or Base) a Base buyer should
+  be verified against is unresolved: World's integration guide and CLI registration
+  guide disagree.
+- **The application does not consume Graph data.** The custom subgraph and recorded
+  event checks exist; no application path reads from the index.
 
 See [SECURITY.md](./SECURITY.md) for detailed assumptions, logging restrictions,
 upstream dependencies, and non-guarantees.
@@ -707,34 +725,10 @@ tested. `WorldAgentKitAuthorizer`, AgentBook lookup, and registered buyer/attack
 agents remain pending. The mock's `humanId` is synthetic, and responses identify
 `authentication: "mock-wallet"` with `humanVerified: false`.
 
-[WORLD_FEEDBACK.md](./WORLD_FEEDBACK.md) records registration friction, the documentation
-disagreement about registry/network defaults, and the draft questions for World.
-It is not evidence that a message was sent or that registration succeeded.
-
 The connected demo now uses a new buyer-generated preimage bundle and binds the quote
 to buyer A's signing wallet. The final World demonstration must additionally authenticate
 that wallet through AgentKit and exercise real registered agents. Receipt #1 and the local mock demo establish different things and cannot
 substitute for that verification. No automatic World-to-mock downgrade is implemented.
-
-## Sponsor boundaries and submission information
-
-Official pages checked **2026-09-13**; eligibility is not established by this README.
-
-- [World AgentKit Continuity](https://ethglobal.com/events/ethonline2026/prizes/world)
-  requires meaningful AgentKit use, a working app, AgentBook registration/resolution
-  where relevant, Sandbox App testing and feedback. This checkout has the mock seam
-  and feedback notes, not the unfinished World implementation or sandbox evidence.
-- [The Graph AI Continuity track](https://ethglobal.com/events/ethonline2026/prizes/the-graph)
-  requires The Graph to be integral to AI tooling or an agent/app's live data use,
-  plus meaningful work with that data, not simply printing a query result. Our
-  custom subgraph and recorded event checks are implemented; the application does
-  not consume Graph data. The composable/standardized-products track separately
-  requires product composition or meaningful standardized-schema use; one custom
-  subgraph does not establish that. No qualification claim is made for either track.
-- [Event submission rules](https://ethglobal.com/events/ethonline2026/info/details)
-  require a public project record, a 2–4 minute demo, Continuity separation and AI
-  attribution; spec-driven work must include its prompts/specs/planning artifacts.
-  See the [AI-use record](./documentation/AI_USAGE.md).
 
 ## License
 
