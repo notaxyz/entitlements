@@ -393,10 +393,12 @@ explain both permission gates and why a new redemption deployment changes replay
 | --- | --- | --- | --- |
 | Base mainnet | `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://basescan.org/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) | September 2026 |
 | Base mainnet | `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) | September 2026 |
-| Arbitrum Sepolia | `NotaX402Settlement` | **TODO: address pending** ([Arbiscan Sepolia](https://sepolia.arbiscan.io/)) | Pending |
-| Arbitrum Sepolia | `EntitlementRedemption` | **TODO: address pending** ([Arbiscan Sepolia](https://sepolia.arbiscan.io/)) | Pending |
+| Arbitrum Sepolia | `NotaX402Settlement` | [`0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8`](https://sepolia.arbiscan.io/address/0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8#code) | October 2026 |
+| Arbitrum Sepolia | `EntitlementRedemption` | [`0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE`](https://sepolia.arbiscan.io/address/0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE#code) | October 2026 |
 
-<!-- TODO: fill in the Arbitrum Sepolia addresses once deployed; do not copy Base addresses. -->
+The Arbitrum Sepolia contracts build on the upstream testnet store
+`0x6b13e2077c84e1326111acBbb618E028723e2EA2` and its registry. Transactions, wiring checks
+and bytecode hashes are recorded in [`deployments/arbitrum-sepolia.json`](./deployments/arbitrum-sepolia.json).
 
 ## Public evidence indexing with The Graph
 

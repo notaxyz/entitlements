@@ -1,0 +1,101 @@
+{
+  "network": "arbitrum-sepolia",
+  "chainId": 421614,
+  "deployedAt": "2026-10-03T13:00:03Z",
+  "deploymentCompletedAt": "2026-10-03T13:03:05Z",
+  "evidenceCheckedAt": "2026-10-03T13:05:33Z",
+  "gitCommit": "954f830bb253f5cd9fcfd6954689351cafcb6383",
+  "deployer": "0x628D526F6ded53eBdE597888541e8F33F42f5E91",
+  "settlementToken": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+  "settlementTokenSymbol": "USDC",
+  "compiler": {
+    "version": "0.8.24+commit.e11b9ed9",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "viaIR": false,
+    "metadataBytecodeHash": "ipfs"
+  },
+  "baseline": {
+    "repository": "https://github.com/notaxyz/contracts",
+    "deploymentRecord": "deployments/arbitrum-sepolia-attest.json",
+    "gitCommit": "84ac4f6",
+    "note": "The receipt store, registry, and USDC pre-exist this repository and were not redeployed. This store's SIGNED_RECEIPT_QUOTE_TYPEHASH matches the Base mainnet store. The older v1 testnet store in arbitrum-sepolia.json uses a different quote typehash and is not compatible."
+  },
+  "notaReceiptStore": {
+    "address": "0x6b13e2077c84e1326111acBbb618E028723e2EA2",
+    "preExisting": true
+  },
+  "purchaseRefRegistry": {
+    "address": "0x32aAeC7768adBBFD65C776b129616b8727d0c8bd",
+    "owner": "0x628D526F6ded53eBdE597888541e8F33F42f5E91",
+    "preExisting": true
+  },
+  "notaX402Settlement": {
+    "address": "0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8",
+    "deployTxHash": "0xc0e8319e44a9aeab6894513eb426d220008296487620f773cc4b4cf7675ab86c",
+    "deployBlock": 315335082,
+    "deployBlockHash": "0x968fb9d161ecbae139e3f54e712129ac751930619d6c67721c14e47cbe680192",
+    "deployedAt": "2026-10-03T13:00:03Z",
+    "status": "success",
+    "deployerNonce": 4,
+    "constructorArgs": [
+      "0x6b13e2077c84e1326111acBbb618E028723e2EA2"
+    ],
+    "store": "0x6b13e2077c84e1326111acBbb618E028723e2EA2",
+    "purchaseRefRegistry": "0x32aAeC7768adBBFD65C776b129616b8727d0c8bd",
+    "settlementToken": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+    "authorizedInPurchaseRefRegistry": true,
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0x1f54a40759d95ab06025c9f4c199ae66c070f65a1a9bcab39d3d0ea63c271822",
+    "runtimeCodeHash": "0x5011e2099b7d5d6f450b036b9c6720ed872ec3a8b21cc14c9e0e678fe6b1057c",
+    "arbiscanVerified": true,
+    "verificationUrl": "https://sepolia.arbiscan.io/address/0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8#code"
+  },
+  "registryAuthorization": {
+    "registry": "0x32aAeC7768adBBFD65C776b129616b8727d0c8bd",
+    "consumer": "0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8",
+    "sender": "0x628D526F6ded53eBdE597888541e8F33F42f5E91",
+    "function": "setConsumerAuthorization(address,bool)",
+    "authorized": true,
+    "txHash": "0xa6ce3e46e18a8e9efe83c0d12dedd51e49baa1716ce16ad485157fd662c86d41",
+    "block": 315335651,
+    "blockHash": "0xf5b4ffb48e188c1fd65672973d80ecab40c311b5d9bfa7a43e99ad4e92301b4e",
+    "timestamp": "2026-10-03T13:02:26Z",
+    "status": "success",
+    "deployerNonce": 5
+  },
+  "entitlementRedemption": {
+    "address": "0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE",
+    "deployTxHash": "0xcfb807a5c1fba09ba990bedc694f415d49d18ac765eebd7cb625e69afefa5c38",
+    "deployBlock": 315335814,
+    "deployBlockHash": "0x8068daacb7ba857939def4fa93e86d7741c29f0eb880d8a497229085a33c94da",
+    "deployedAt": "2026-10-03T13:03:05Z",
+    "status": "success",
+    "deployerNonce": 6,
+    "constructorArgs": [
+      "0x6b13e2077c84e1326111acBbb618E028723e2EA2",
+      [
+        "0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8"
+      ]
+    ],
+    "store": "0x6b13e2077c84e1326111acBbb618E028723e2EA2",
+    "purchaseRefRegistry": "0x32aAeC7768adBBFD65C776b129616b8727d0c8bd",
+    "acceptedConsumers": [
+      "0x6b13e2077c84e1326111acBbb618E028723e2EA2",
+      "0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8"
+    ],
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0x2a9e14043847daad58bd5070c2030f5b13f3b0ec91654567e2e5416f0b045bfc",
+    "runtimeCodeHash": "0x9038c3a401afe9ebc03cc40c566c690c4fdab460eccc72cb5438bade24cb67da",
+    "arbiscanVerified": true,
+    "verificationUrl": "https://sepolia.arbiscan.io/address/0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE#code"
+  },
+  "scope": {
+    "testnet": true,
+    "publicPurchaseAndRedemptionDemoRecorded": false,
+    "subgraphPublished": false,
+    "worldRegistrationVerified": false,
+    "note": "Testnet deployment only. Deployment and source verification are not proof of live application integration, a security audit, fulfillment, or human-backed agent authentication. Registry authorization is a checked snapshot and can be revoked by its owner."
+  }
+}
