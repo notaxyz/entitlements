@@ -8,6 +8,7 @@
   "deployer": "0x628D526F6ded53eBdE597888541e8F33F42f5E91",
   "settlementToken": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
   "settlementTokenSymbol": "USDC",
+  "notes": "No client flow runs against this deployment yet: no facilitator, resource server, purchase or redemption has been exercised on Arbitrum Sepolia.",
   "compiler": {
     "version": "0.8.24+commit.e11b9ed9",
     "optimizerEnabled": true,
