@@ -316,8 +316,7 @@ This repository adds the EIP-3009 settlement adapter, entitlement contract,
 buyer-authenticated backend, restart recovery, connected demo, and Graph event index
 over the [pre-existing Nota protocol](./BASELINE.md).
 
-**Provenance:** [baseline](./BASELINE.md), [commit history](#what-this-repository-adds),
-and [AI assistance / available prompts](./documentation/AI_USAGE.md).
+**Provenance:** [baseline](./BASELINE.md) and [commit history](#what-this-repository-adds).
 
 This layer builds on [`notaxyz/contracts@238cb210`](https://github.com/notaxyz/contracts/tree/238cb210e1342892c122b794563b1db99bd4b891), which provides seller-signed EIP-712 quotes, USDC settlement, `ReceiptPurchasedV2`, and global one-time purchase-reference consumption.
 
