@@ -6,6 +6,8 @@ One purchase and one redemption were run against the Arbitrum Sepolia deployment
 2026-10-03. This page has two parts:
 
 - Part one shows how to check that run from public chain data alone. You don't need to run anything.
+  It then does the same for [the attested run](#part-one-continued-the-attested-run), a second
+  purchase made the same day through `notaxyz/bazaar-seller`.
 - Part two shows how to run it again with your own keys.
 
 ## Part one: verify the recorded run
@@ -83,6 +85,102 @@ The run's other two attempts never reached the chain:
 
 The redemption server's log in [`runs/`](../runs/) shows both refusals happened before any
 transaction was sent.
+
+## Part one, continued: the attested run
+
+The same buyer and seller also ran the attested path on 2026-10-03, through
+[`notaxyz/bazaar-seller`](https://github.com/notaxyz/bazaar-seller). The buyer pays an x402
+facilitator in a separate USDC transfer. The seller then records the sale itself with
+`attestReceipt`. Checking it needs chain data, one published file, and `cast`.
+
+| Value | Recorded |
+| --- | --- |
+| Store (`NotaReceiptStore`, `attestReceipt` build) | [`0x6b13e2077c84e1326111acBbb618E028723e2EA2`](https://sepolia.arbiscan.io/address/0x6b13e2077c84e1326111acBbb618E028723e2EA2#code) |
+| `PurchaseRefRegistry` | [`0x32aAeC7768adBBFD65C776b129616b8727d0c8bd`](https://sepolia.arbiscan.io/address/0x32aAeC7768adBBFD65C776b129616b8727d0c8bd#readContract), the same registry as above |
+| Payment transaction | [`0xbe3d62b4…7872f70c6`](https://sepolia.arbiscan.io/tx/0xbe3d62b4e485bd827f6a2e7ed53deba086a1f2a6d6650da9746efff7872f70c6#eventlog) (block 315,317,494) |
+| Forward transaction | [`0x8d51e24c…c10a6e86`](https://sepolia.arbiscan.io/tx/0x8d51e24cb706b02901cdf2cc7c1bc0454be472e65b192e3a98960962c10a6e86#eventlog) (block 315,317,499) |
+| Attestation transaction | [`0x8fe4acbc…4a32a17d9`](https://sepolia.arbiscan.io/tx/0x8fe4acbc8f60d94de4fea01cf3619766e7092375ccd1275d306d28d4a32a17d9#eventlog) (block 315,317,510) |
+| `purchaseRef` | `0x4065dbc7327556345eb940dc60d2ef2cea64f77776c6f01b42c1289e13b80999` |
+| Delivered bytes | [`runs/2026-10-03-arb-sepolia-attested-response-bytes.json`](../runs/2026-10-03-arb-sepolia-attested-response-bytes.json), 4,925 bytes |
+
+**`purchaseRef` joins only the attestation and the registry consumption.** It does not
+appear in the payment or the forward. Nothing on chain binds either transfer to the
+attestation.
+
+### A1. The payment
+
+Open the [payment transaction's event log](https://sepolia.arbiscan.io/tx/0xbe3d62b4e485bd827f6a2e7ed53deba086a1f2a6d6650da9746efff7872f70c6#eventlog).
+USDC (`0x75fa…AA4d`) emits `AuthorizationUsed` and one `Transfer`:
+
+| Field | Expected |
+| --- | --- |
+| `from` | `0x2Ec0888751f2F82a12F60a638A73780e2D70f5f8`, the buyer |
+| `to` | `0x70c2fF74596E69974cc207183F241a573201AC14`, the facilitator's signer, which also sent this transaction |
+| `value` | `250000` (0.25 USDC) |
+
+That signer also sent the settlement recorded in bazaar-seller's
+[2026-10-02 run log](https://github.com/notaxyz/bazaar-seller/blob/main/runs/agent-run-2026-10-02.txt).
+The payment carries no `purchaseRef`.
+
+### A2. The forward
+
+Open the [forward transaction's event log](https://sepolia.arbiscan.io/tx/0x8d51e24cb706b02901cdf2cc7c1bc0454be472e65b192e3a98960962c10a6e86#eventlog).
+One USDC `Transfer` moves `149253` from the facilitator's signer to the seller,
+`0xF2E63f2339141A317e0f446Bf1d81593aBc5D557`. That amount matches the fee split in the
+2026-10-02 run log: `149253` to the merchant, a `747` service fee and a `100000` gas fee, out
+of `250000`. Nothing on chain ties this transfer to the payment.
+
+### A3. The attestation
+
+Open the [attestation transaction's event log](https://sepolia.arbiscan.io/tx/0x8fe4acbc8f60d94de4fea01cf3619766e7092375ccd1275d306d28d4a32a17d9#eventlog).
+The store emits `ReceiptAttested`:
+
+| Field | Expected |
+| --- | --- |
+| `receiptId` | `6` |
+| `seller` (indexed) | `0xF2E63f2339141A317e0f446Bf1d81593aBc5D557` |
+| `buyer` (indexed) | `0x2Ec0888751f2F82a12F60a638A73780e2D70f5f8` |
+| `listingId` | `1` |
+| `purchaseRef` (indexed) | `0x4065dbc7…e13b80999` |
+| `metadataHash` | `0xb2d6f57d87d57a6189fdf9f304114fd285b84fb6ca6b9980d395ec8e9135800d` |
+| `agentId` | `0x0` |
+| `paymentRef` | `0xbe3d62b4e485bd827f6a2e7ed53deba086a1f2a6d6650da9746efff7872f70c6`, the payment transaction |
+
+The seller sent this transaction. The same transaction contains the registry's
+`PurchaseRefConsumed` for the same `purchaseRef`.
+
+**`paymentRef` is a seller assertion.** The seller chose it and passed it to
+`attestReceipt`. It points at the payment transaction above, but nothing on chain binds
+that payment to this attestation. The store never saw the transfer, and the event carries
+no amount. bazaar-seller's own verifier labels `paymentRef` "not evidence of payment". The
+attestation is the seller's own commitment, not something the contract witnessed.
+
+### A4. The registry consumed the reference, and the consumer is the store
+
+On the [registry's Read Contract tab](https://sepolia.arbiscan.io/address/0x32aAeC7768adBBFD65C776b129616b8727d0c8bd#readContract),
+call `consumedBy` with the `purchaseRef`. It returns the store,
+`0x6b13e2077c84e1326111acBbb618E028723e2EA2`, because `attestReceipt` consumes through the
+store. In the run above, the consumer is the adapter.
+
+### A5. The attestation commits to the delivered bytes
+
+The published file is the response body exactly as the buyer's client saved it on receipt.
+Download it and hash it:
+
+```bash
+curl -sL https://raw.githubusercontent.com/notaxyz/entitlements/main/runs/2026-10-03-arb-sepolia-attested-response-bytes.json -o attested-response.json
+wc -c < attested-response.json
+cast keccak 0x$(od -An -v -tx1 attested-response.json | tr -d ' \n')
+```
+
+`wc` prints `4925`. `cast keccak` prints
+`0xb2d6f57d87d57a6189fdf9f304114fd285b84fb6ca6b9980d395ec8e9135800d`, the attestation's
+`metadataHash`. The `od` pipeline passes the file to `cast` as hex, so every byte is hashed
+exactly as stored. From a clone, run the last command on the file in `runs/` directly.
+
+**The contrast with the run above is the point of shipping both paths.** There, `purchaseRef`
+is a real join key: the adapter moved the funds and emitted `X402ReceiptSettled` with that
+`purchaseRef` in the same transaction. Here, the contract witnessed only the seller's claim.
 
 ## Part two: reproduce it yourself
 
@@ -191,11 +289,24 @@ the same file.
 
 Notes on the table:
 
-- **`FROM_BLOCK`:** without it, the resource server searches for the settlement from block 0,
-  and public RPCs typically reject a search that large.
+- **`FROM_BLOCK`:** the resource server looks for the settlement with one `eth_getLogs` query
+  from `FROM_BLOCK` to the latest block, and RPC providers cap that range. Set it just before
+  you start the services:
+
+  ```bash
+  export FROM_BLOCK=$(( $(cast block-number --rpc-url "$RPC_URL") - 100 ))
+  ```
+
+  Measured on 2026-10-04, the official endpoint `https://sepolia-rollup.arbitrum.io/rpc` rejects
+  ranges over 10,000,000 blocks. That is about 29 days at Arbitrum Sepolia's four blocks a
+  second. `https://arbitrum-sepolia-rpc.publicnode.com` rejects ranges over 50,000 blocks, about
+  three and a half hours. The range grows as the chain advances, so on a low-cap provider a
+  `FROM_BLOCK` that worked at startup stops working once the chain moves past the cap. Restart
+  the resource server with a fresh value. When the query is rejected, the resource server
+  answers HTTP 503. Without `FROM_BLOCK`, the search starts at block 0, which both endpoints
+  reject.
 - **Preflight addresses:** the preflight script reads every contract address from the
   deployment record, not from these variables.
-- **`NODE_ENV=production`:** the redemption server refuses to start in mock mode.
 
 ### 6. Ports
 
@@ -272,6 +383,9 @@ so they are not a lasting secret once redeemed.
 
 ### Warnings
 
+**Do not set `NODE_ENV=production`.** The redemption server refuses mock mode in production,
+and this demo requires `AGENT_AUTH_MODE=mock`.
+
 **Set the RPC and chain on every service.**
 
 - **RPC variable:** all three services read `RPC_URL`. Set it to your Arbitrum Sepolia
@@ -299,7 +413,8 @@ Their fee models are incompatible. Pointing the resource server at the wrong one
 settlement failure that looks like a contract bug.
 
 The attestation flow is a separate scheme in a separate repository,
-[`notaxyz/bazaar-seller`](https://github.com/notaxyz/bazaar-seller). It is not covered here.
+[`notaxyz/bazaar-seller`](https://github.com/notaxyz/bazaar-seller). To verify its recorded
+run, see [the attested run](#part-one-continued-the-attested-run) in part one.
 
 ## Limitations
 
