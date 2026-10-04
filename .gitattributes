@@ -1,0 +1,2 @@
+# Hashed byte for byte against an on-chain metadataHash; never normalize line endings.
+runs/2026-10-03-arb-sepolia-attested-response-bytes.json -text
