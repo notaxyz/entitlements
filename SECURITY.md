@@ -33,6 +33,8 @@ The contract does not identify or authenticate the buyer or purchasing agent. Po
 
 In particular, the policy **“a stolen receipt is not enough” is not enforced by this contract**. It is a merchant-side authorization rule implemented by the redemption endpoint. Its current mock authorizer proves control of the settlement buyer's EOA wallet, not human backing. A World/AgentBook authorizer is not yet implemented or live-verified. A seller who bypasses this endpoint can still redeem directly.
 
+More generally, **a redemption does not prove that a third party paid.** The seller of a listing can produce `EntitlementRedeemed` on it at no net cost by buying from itself at `MIN_PURCHASE_AMOUNT`, where the protocol fee rounds to zero and the payment returns to the seller. `purchaseReceipt` does this on a fixed-price listing priced at that minimum; a self-signed quote at that amount does it on any listing, whatever its `unitPrice`. On deployments carrying `attestReceipt`, the seller can skip even that float and do it for gas alone. Every route needs the listing active and purchases unpaused. Anything treating a redemption on a listing as evidence of an arm's-length purchase can be fooled by that listing's seller. What a redemption does prove is consumption: an accepted module consumed the reference, and it cannot be redeemed twice through this deployment. `test/AttestReceiptRedemption.t.sol` pins both sides.
+
 The contract also does not validate off-chain fulfillment, inspect receipt metadata, or require that a listing remains active after purchase.
 
 ### Redemption preimage bundle
@@ -136,6 +138,22 @@ who chooses to bypass the endpoint.
 7. Proceeds are paid using the fee breakdown the store returned, not a local recomputation. The three legs sum to the gross by construction, so the adapter retains no balance.
 
 The submitter is untrusted. Both signatures are verified on-chain and every amount is bound to the quote, so any address may pay the gas.
+
+### Purchase-reference griefing
+
+This is a different attack from the authorization front-running that item 5 addresses. `receiveWithAuthorization` stops an observed buyer authorization from being executed outside the adapter; it does nothing about the vector below, and neither mitigates the other.
+
+A purchase reference is consumed once, globally, in the shared `PurchaseRefRegistry`. `NotaReceiptStore.attestReceipt` checks that the caller owns the listing it names, not that the `purchaseRef` was issued by them. A seller who learns another seller's issued but not yet settled `purchaseRef` can attest it against their own listing and consume it for the cost of gas. The buyer's purchase of the original quote then reverts with `PurchaseRefAlreadyUsed`. The outcome is denial of purchase.
+
+`purchaseReceipt` has always permitted the same thing: an attacker can buy their own fixed-price listing at `MIN_PURCHASE_AMOUNT` with the victim's ref, recovering the price, net of a protocol fee that rounds to zero. `attestReceipt` removes even that float, reducing the cost to gas. The vector is not new.
+
+The `attestReceipt` route exists only on deployments carrying it, Arbitrum Sepolia today, not Base. The `purchaseReceipt` route exists on both.
+
+Refs are high-entropy and reach only whoever holds the payment link, so the exposure is quotes that have been issued but not yet settled. This is tracked in [notaxyz/contracts#8](https://github.com/notaxyz/contracts/issues/8) and pinned by `test_AttestReceipt_CanConsumeAnotherSellersUnredeemedRef_KnownGriefingVector` in `contracts/test/NotaReceiptStore.t.sol`.
+
+The attacker must be the seller of a listing, but that is not a registration gate: `createListing` is open to any address unless the store owner has paused listing creation. The requirement costs an attacker one extra transaction, not prior standing as a seller.
+
+Operationally, the sensitive value is the `purchaseRef` hash of a quote that has not yet settled. This is the on-chain hash, not the redemption preimage bundle described above. The 402 response discloses it to the buyer by design, so it cannot be withheld. The rule is containment, not secrecy: while a quote is unsettled, 402 bodies, quote records and request traces should not reach logs, analytics, error reporting, or any party other than the buyer. Exposure ends at settlement, when the purchase itself consumes the reference. A short quote lifetime, capped by the store's `MAX_QUOTE_TTL`, bounds the window.
 
 ### Three values, one of which is secret
 

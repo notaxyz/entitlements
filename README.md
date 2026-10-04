@@ -64,7 +64,7 @@ how [the event index](./documentation/INDEXING.md) joins them.
 
 Node.js 22 (minimum 20.19) and Foundry 1.8.1, matching [CI](./.github/workflows/test.yml).
 Clone with submodules — a source ZIP omits the Solidity dependencies, and `npm ci` alone
-does not populate them.
+does not populate them. Already cloned? Run `git submodule update --init --recursive`.
 
 ```sh
 git clone --recurse-submodules https://github.com/notaxyz/entitlements.git
@@ -112,6 +112,9 @@ keep keys and bundles out of command history and recordings.
 - **Buyer matching is endpoint policy.** The contract checks the seller, accepted
   consumption and replay. It does not check the buyer, so a seller can bypass the endpoint
   and redeem directly.
+- **Unsettled refs can be griefed.** Consumption does not check which seller issued a ref, so
+  anyone who learns an unsettled one can consume it and deny the buyer's purchase: on any
+  deployment, through a self-purchase at the minimum price, or for gas through `attestReceipt` where deployed ([notaxyz/contracts#8](https://github.com/notaxyz/contracts/issues/8)).
 - **Replay protection is per redemption deployment.** A new accepted-consumer set needs a
   new deployment with empty state, so migration must account for entitlements already
   redeemed against an older address.

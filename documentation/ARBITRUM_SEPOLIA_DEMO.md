@@ -105,11 +105,20 @@ You need:
 - Foundry, for `cast`
 - an Arbitrum Sepolia RPC endpoint
 
-Then, from a fresh clone:
+Then clone with submodules and install:
 
 ```bash
+git clone --recurse-submodules https://github.com/notaxyz/entitlements.git
+cd entitlements
 npm ci
 ```
+
+Already cloned? Run `git submodule update --init --recursive`.
+
+This demo does not need the submodules or `forge build`. The runner, the preflight and the
+three services run TypeScript through `tsx`, and none of them reads Solidity build output or
+anything under `lib/`. Foundry is needed here only for `cast`. The submodules matter only if
+you also build or test the contracts.
 
 ### 2. Roles
 
