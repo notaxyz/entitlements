@@ -2,15 +2,20 @@
 
 [Project overview](../README.md) · [Deployment record](../deployments/arbitrum-sepolia.json) · [Run logs](../runs/)
 
-One purchase and one redemption were run against the Arbitrum Sepolia deployment on
-2026-10-03. This page has two parts:
+Two purchases were run against the Arbitrum Sepolia deployment on 2026-10-03, one per path:
 
-- Part one shows how to check that run from public chain data alone. You don't need to run anything.
-  It then does the same for [the attested run](#part-one-continued-the-attested-run), a second
-  purchase made the same day through `notaxyz/bazaar-seller`.
-- Part two shows how to run it again with your own keys.
+- **Bound:** a purchase settled through the `NotaX402Settlement` adapter, then redeemed once.
+- **Attested:** a purchase paid through an x402 facilitator and recorded by the seller with
+  `attestReceipt`, through `notaxyz/bazaar-seller`.
 
-## Part one: verify the recorded run
+This page has two parts:
+
+- Part one shows how to check both runs from public data alone: the bound run first,
+  then [the attested run](#part-one-continued-the-attested-run). The bound run needs nothing
+  installed. The attested run needs `cast` for one hash.
+- Part two shows how to run the bound purchase again with your own keys.
+
+## Part one: verify the bound run
 
 | Value | Recorded |
 | --- | --- |
@@ -89,8 +94,9 @@ transaction was sent.
 ## Part one, continued: the attested run
 
 The same buyer and seller also ran the attested path on 2026-10-03, through
-[`notaxyz/bazaar-seller`](https://github.com/notaxyz/bazaar-seller). The buyer pays an x402
-facilitator in a separate USDC transfer. The seller then records the sale itself with
+[`notaxyz/bazaar-seller`](https://github.com/notaxyz/bazaar-seller). The buyer pays
+`notaxyz/x402-facilitator`, the plain x402 facilitator described under
+[Warnings](#warnings), in a separate USDC transfer. The seller then records the sale itself with
 `attestReceipt`. Checking it needs chain data, one published file, and `cast`.
 
 | Value | Recorded |
@@ -126,9 +132,10 @@ The payment carries no `purchaseRef`.
 
 Open the [forward transaction's event log](https://sepolia.arbiscan.io/tx/0x8d51e24cb706b02901cdf2cc7c1bc0454be472e65b192e3a98960962c10a6e86#eventlog).
 One USDC `Transfer` moves `149253` from the facilitator's signer to the seller,
-`0xF2E63f2339141A317e0f446Bf1d81593aBc5D557`. That amount matches the fee split in the
-2026-10-02 run log: `149253` to the merchant, a `747` service fee and a `100000` gas fee, out
-of `250000`. Nothing on chain ties this transfer to the payment.
+`0xF2E63f2339141A317e0f446Bf1d81593aBc5D557`. No log of this run is published. The 2026-10-02 run
+log records a different run through the same facilitator, at the same price, with this fee
+split: `149253` to the merchant, a `747` service fee and a `100000` gas fee, out of `250000`.
+The amount here matches it. Nothing on chain ties this transfer to the payment.
 
 ### A3. The attestation
 
@@ -143,7 +150,7 @@ The store emits `ReceiptAttested`:
 | `listingId` | `1` |
 | `purchaseRef` (indexed) | `0x4065dbc7…e13b80999` |
 | `metadataHash` | `0xb2d6f57d87d57a6189fdf9f304114fd285b84fb6ca6b9980d395ec8e9135800d` |
-| `agentId` | `0x0` |
+| `agentId` | `0x0`: no agent identity was bound to this receipt |
 | `paymentRef` | `0xbe3d62b4e485bd827f6a2e7ed53deba086a1f2a6d6650da9746efff7872f70c6`, the payment transaction |
 
 The seller sent this transaction. The same transaction contains the registry's
