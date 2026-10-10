@@ -9,7 +9,7 @@
  *   npm run facilitator
  *   npm run resource-server
  *   npm run redemption-server
- *   npm run demo:arb-sepolia
+ *   npm run demo:arb-sepolia   (or demo:arb-one; the chain comes only from the environment)
  *
  * Authentication is the explicitly labelled mock wallet seam: it proves control of the
  * wallet that paid. It is not World ID and resolves no AgentBook registration.

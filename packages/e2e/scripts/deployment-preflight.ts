@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { createPublicClient, http, isAddressEqual, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -12,13 +12,33 @@ import {
 } from "@nota/x402-nota";
 import { CATALOG } from "../../resource-server/src/catalog.js";
 import { redemptionAbi } from "../../resource-server/src/redemption/abi.js";
-import deployment from "../../../deployments/arbitrum-sepolia.json";
 import { repoRoot } from "../src/live-config.js";
 
-// Read-only Arbitrum Sepolia readiness check: no transactions, no files written.
+// Read-only readiness check for a live deployment: no transactions, no files written.
 // Prints addresses and amounts only. Never prints a private key or a redemption bundle.
+//
+//   tsx deployment-preflight.ts <deployment manifest> <catalog id>
+//
+// Every contract address and the chain id come from the manifest, never from the environment.
 
-const CATALOG_ID = "arbitrum-sepolia-sample-report";
+interface DeploymentManifest {
+  chainId: number;
+  settlementToken: string;
+  notaReceiptStore: { address: string };
+  purchaseRefRegistry: { address: string };
+  notaX402Settlement: { address: string };
+  entitlementRedemption: { address: string };
+}
+
+const [manifestArg, catalogArg] = process.argv.slice(2);
+if (!manifestArg || !catalogArg) {
+  throw new Error("usage: deployment-preflight.ts <deployment manifest> <catalog id>");
+}
+const CATALOG_ID: string = catalogArg;
+const deployment = JSON.parse(
+  readFileSync(path.resolve(repoRoot, manifestArg), "utf8"),
+) as DeploymentManifest;
+if (!CATALOG[CATALOG_ID]) throw new Error(`unknown catalog id ${CATALOG_ID}`);
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = "") {
