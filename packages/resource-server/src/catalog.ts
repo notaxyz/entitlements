@@ -50,23 +50,4 @@ export const CATALOG: Record<string, CatalogEntry> = {
       note: "Illustrative testnet content. Sample values, not market data. Returned only after a settled Nota receipt is found on chain.",
     },
   },
-  "arbitrum-one-sample-report": {
-    id: "arbitrum-one-sample-report",
-    description: "Arbitrum One sample report (illustrative content)",
-    amount: 100_000n,
-    items: [
-      {
-        sku: "report-arbitrum-one-sample",
-        name: "Arbitrum One sample report",
-        quantity: 1,
-        unitAmount: "80000",
-      },
-      { sku: "csv-appendix", name: "CSV appendix", quantity: 2, unitAmount: "10000" },
-    ],
-    body: {
-      report: "arbitrum-one-sample-report",
-      sampleValues: { transfers: 1_234, uniqueWallets: 56 },
-      note: "Illustrative content. Sample values, not market data. Returned only after a settled Nota receipt is found on chain.",
-    },
-  },
 };

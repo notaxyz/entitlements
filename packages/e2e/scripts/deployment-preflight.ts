@@ -17,9 +17,11 @@ import { repoRoot } from "../src/live-config.js";
 // Read-only readiness check for a live deployment: no transactions, no files written.
 // Prints addresses and amounts only. Never prints a private key or a redemption bundle.
 //
-//   tsx deployment-preflight.ts <deployment manifest> <catalog id>
+//   tsx deployment-preflight.ts <deployment manifest> [catalog id]
 //
 // Every contract address and the chain id come from the manifest, never from the environment.
+// Without a catalog id only the deployment's wiring is checked; with one, the seller, buyer and
+// quote store are also checked as ready to purchase that catalog entry.
 
 interface DeploymentManifest {
   chainId: number;
@@ -31,19 +33,24 @@ interface DeploymentManifest {
 }
 
 const [manifestArg, catalogArg] = process.argv.slice(2);
-if (!manifestArg || !catalogArg) {
-  throw new Error("usage: deployment-preflight.ts <deployment manifest> <catalog id>");
+if (!manifestArg) {
+  throw new Error("usage: deployment-preflight.ts <deployment manifest> [catalog id]");
 }
-const CATALOG_ID: string = catalogArg;
+const CATALOG_ID: string | undefined = catalogArg;
 const deployment = JSON.parse(
   readFileSync(path.resolve(repoRoot, manifestArg), "utf8"),
 ) as DeploymentManifest;
-if (!CATALOG[CATALOG_ID]) throw new Error(`unknown catalog id ${CATALOG_ID}`);
+if (CATALOG_ID && !CATALOG[CATALOG_ID]) throw new Error(`unknown catalog id ${CATALOG_ID}`);
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = "") {
   if (!ok) failures++;
   console.info(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
+}
+
+function report() {
+  console.info(failures === 0 ? "\npreflight: PASS" : `\npreflight: FAIL (${failures})`);
+  if (failures) process.exitCode = 1;
 }
 
 async function main() {
@@ -56,7 +63,6 @@ async function main() {
   const adapter = deployment.notaX402Settlement.address as Address;
   const redemption = deployment.entitlementRedemption.address as Address;
   const listingId = BigInt(process.env.LISTING_ID ?? "1");
-  const amount = CATALOG[CATALOG_ID]!.amount;
 
   const client = createPublicClient({
     chain: notaChain(deployment.chainId, rpcUrl),
@@ -88,6 +94,9 @@ async function main() {
     "store.purchasesPaused() is false",
     !(await read<boolean>(store, notaReceiptStoreAbi, "purchasesPaused")),
   );
+
+  if (!CATALOG_ID) return report();
+  const amount = CATALOG[CATALOG_ID]!.amount;
 
   const sellerKey = process.env.SELLER_PRIVATE_KEY as Hex | undefined;
   const listing = await read<{ seller: Address; active: boolean }>(
@@ -154,8 +163,7 @@ async function main() {
     );
   }
 
-  console.info(failures === 0 ? "\npreflight: PASS" : `\npreflight: FAIL (${failures})`);
-  if (failures) process.exitCode = 1;
+  report();
 }
 
 main().catch((error) => {
