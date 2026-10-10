@@ -35,8 +35,8 @@ sequenceDiagram
     M->>B: hashPurchaseRef (RPC sees bundle)
     M->>M: Persist order and merchant-held bundle copy
     M-->>A: 402 + buyer-bound quote + itemized metadata + public purchaseRef
-    A->>B: Reconstruct own bundle commitment, verify trusted wiring and seller quote
-    A->>A: Verify metadata hash and total, then sign EIP-3009
+    A->>B: Reconstruct own bundle commitment; verify trusted wiring and seller quote
+    A->>A: Verify metadata hash and total; sign EIP-3009
     A->>F: POST /settle (quote + payment signature, no bundle)
     F->>B: settleWithAuthorization (relayer pays gas)
     B-->>F: X402ReceiptSettled
@@ -48,7 +48,7 @@ sequenceDiagram
     M->>B: Verify adapter settlement and registry consumption
     M->>M: Verify signed access challenge against buyer
     M-->>A: Content + receipt + merchant-held bundle copy
-    Note over A,M: Content is delivered BEFORE redemption. Recovery repeats signed access after restart
+    Note over A,M: Content is delivered BEFORE redemption; recovery repeats signed access after restart
     A->>R: Fresh redemption challenge, then signed POST /v1/redemptions + bundle + purchaseTxHash
     R->>B: Verify receipt/order, consumedBy and redeemedAt
     R->>R: Require authenticated wallet == receipt buyer
