@@ -50,7 +50,7 @@
     "creationInputMatchesLocalArtifact": true,
     "creationInputHash": "0x58e6ddafa6b0b9d82605b41abef66ef511e7683ebbc1d94a1cc040e11db977a1",
     "runtimeCodeHash": "0x85d931ae479d5a17a8970dffe932b8b53a03e638f49d9b13f9f4112c65118372",
-    "arbiscanVerified": false,
+    "arbiscanVerified": true,
     "verificationUrl": "https://arbiscan.io/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code"
   },
   "registryAuthorization": {
@@ -89,7 +89,7 @@
     "creationInputMatchesLocalArtifact": true,
     "creationInputHash": "0xb815f9520dfebf22b8a7734d396416e33e3135370d87fd51bbd65d27e0cce0d5",
     "runtimeCodeHash": "0xf81b6f8049945b86a7a36649981a7f477e58c2c39028682cfe610931dda35ec4",
-    "arbiscanVerified": false,
+    "arbiscanVerified": true,
     "verificationUrl": "https://arbiscan.io/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code"
   },
   "scope": {
