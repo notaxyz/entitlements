@@ -35,6 +35,11 @@ endpoint reading on-chain `redeemedAt` — it is not a reverted transaction.
 | Base mainnet | `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://basescan.org/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) |
 | Arbitrum Sepolia | `NotaX402Settlement` | [`0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8`](https://sepolia.arbiscan.io/address/0x9e5c2e8E4d38f555f487d3682456Be7c616F00A8#code) |
 | Arbitrum Sepolia | `EntitlementRedemption` | [`0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE`](https://sepolia.arbiscan.io/address/0x8718D0d64F14cB9ef5ecd0c0EAC403b32dC26eEE#code) |
+| Arbitrum One | `NotaX402Settlement` | [`0x59D3076857972372ecc2E845a7e57A83BB9ddDC8`](https://arbiscan.io/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code) |
+| Arbitrum One | `EntitlementRedemption` | [`0xDE4F712fa5B5be32766C34885b334F1D8e573882`](https://arbiscan.io/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code) |
+
+The Arbitrum One contracts are deployed and source-verified. No purchase or redemption has been
+recorded against them yet.
 
 Neither contract is a proxy, an upgrade, or an admin over the store. Neither has an owner,
 a pause switch, or an upgrade path. Redemption moves no funds. Transaction hashes, block

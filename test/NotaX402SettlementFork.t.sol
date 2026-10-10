@@ -12,16 +12,19 @@ import { INotaReceiptStore } from "../src/interfaces/INotaReceiptStore.sol";
 import { INotaSignedQuoteStore } from "../src/interfaces/INotaSignedQuoteStore.sol";
 import { IPurchaseRefRegistry } from "../src/interfaces/IPurchaseRefRegistry.sol";
 
-/// @notice Base-mainnet fork coverage for the x402 settlement adapter.
+/// @notice Mainnet fork coverage for the x402 settlement adapter, run against every chain where the
+///         Nota v2 store and registry are live. Each chain is a small subclass at the bottom of
+///         this file that names its RPC variable, chain id, and native USDC.
 /// @dev Every settlement consumes a purchase reference, so `setUp` pranks the registry owner to
 ///      authorize the adapter. Without that one owner transaction every test here would revert
 ///      with `UnauthorizedConsumer`, which is exactly what happens on a real deployment until the
 ///      post-deploy step in the README is run. `test_RevertsWhenAdapterIsNotAnAuthorizedConsumer`
 ///      pins that behaviour deliberately.
-contract NotaX402SettlementForkTest is Test {
+abstract contract NotaX402SettlementForkBase is Test {
+    /// Same addresses on every chain this suite covers.
     address internal constant NOTA_RECEIPT_STORE = 0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88;
     address internal constant PURCHASE_REF_REGISTRY = 0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991;
-    address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    address internal immutable USDC = _usdc();
 
     uint256 internal constant AMOUNT = 10e6;
     uint256 internal constant BUYER_FUNDING = 1000e6;
@@ -59,13 +62,22 @@ contract NotaX402SettlementForkTest is Test {
         bytes32 authorizationNonce
     );
 
+    /// @dev Name of the environment variable holding this chain's RPC URL.
+    function _rpcEnvVar() internal pure virtual returns (string memory);
+
+    function _chainId() internal pure virtual returns (uint256);
+
+    /// @dev The chain's native USDC, which is also the store's settlement token.
+    function _usdc() internal pure virtual returns (address);
+
     function setUp() public {
-        string memory baseRpcUrl = vm.envOr("BASE_RPC_URL", string(""));
-        if (bytes(baseRpcUrl).length == 0) {
-            vm.skip(true, "BASE_RPC_URL is not set");
+        string memory rpcUrl = vm.envOr(_rpcEnvVar(), string(""));
+        if (bytes(rpcUrl).length == 0) {
+            vm.skip(true, string.concat(_rpcEnvVar(), " is not set"));
         }
 
-        vm.createSelectFork(baseRpcUrl);
+        vm.createSelectFork(rpcUrl);
+        assertEq(block.chainid, _chainId(), string.concat(_rpcEnvVar(), " points at another chain"));
 
         store = INotaSignedQuoteStore(NOTA_RECEIPT_STORE);
         registry = IPurchaseRefRegistry(PURCHASE_REF_REGISTRY);
@@ -239,6 +251,16 @@ contract NotaX402SettlementForkTest is Test {
             address(adapter),
             "the adapter, not the store, is recorded as the consumer"
         );
+
+        // Only the listing's seller may redeem.
+        address notSeller = makeAddr("x402-not-seller");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                EntitlementRedemption.CallerNotSeller.selector, notSeller, seller
+            )
+        );
+        vm.prank(notSeller);
+        redemption.redeemEntitlement(listingId, rawPurchaseRef, purchaseRefNonce);
 
         vm.prank(seller);
         bytes32 redeemed = redemption.redeemEntitlement(listingId, rawPurchaseRef, purchaseRefNonce);
@@ -844,5 +866,36 @@ contract NotaX402SettlementForkTest is Test {
                 verifyingContract
             )
         );
+    }
+}
+
+/// @notice Base mainnet (8453).
+contract NotaX402SettlementForkTest is NotaX402SettlementForkBase {
+    function _rpcEnvVar() internal pure override returns (string memory) {
+        return "BASE_RPC_URL";
+    }
+
+    function _chainId() internal pure override returns (uint256) {
+        return 8453;
+    }
+
+    function _usdc() internal pure override returns (address) {
+        return 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    }
+}
+
+/// @notice Arbitrum One (42161). The store there is the attestReceipt build, a superset of the
+///         Base store's signed-quote surface that this suite exercises.
+contract NotaX402SettlementArbitrumOneForkTest is NotaX402SettlementForkBase {
+    function _rpcEnvVar() internal pure override returns (string memory) {
+        return "ARBITRUM_RPC_URL";
+    }
+
+    function _chainId() internal pure override returns (uint256) {
+        return 42161;
+    }
+
+    function _usdc() internal pure override returns (address) {
+        return 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
     }
 }

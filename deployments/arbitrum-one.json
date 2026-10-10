@@ -1,0 +1,102 @@
+{
+  "network": "arbitrum-one",
+  "chainId": 42161,
+  "deployedAt": "2026-10-10T15:27:06Z",
+  "deploymentCompletedAt": "2026-10-10T15:29:06Z",
+  "evidenceCheckedAt": "2026-10-10T15:32:10Z",
+  "gitCommit": "5a41405e9f2accb8d8420991909dd29fccf6ba8a",
+  "deployer": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+  "settlementToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  "settlementTokenSymbol": "USDC",
+  "notes": "Deployed at the same deployer nonces as Base (adapter 5, registry authorization 6, redemption 7), so both addresses match the Base deployment. Two zero-value self-transfers filled nonces 3 (0x32e03b60002361e5e1ec11e248cf0860790390392f2aacc4c64b384b73f43e1c) and 4 (0x9c1dab8ff507ad020157c1632868c4ad1c80a0a9fca77e82d339fa21cb7c4a53) first. Same addresses do not mean same runtime code: the adapter's settlement-token immutable is Arbitrum native USDC, so its runtime code hash differs from Base; the redemption contract's runtime code is byte-identical to Base. src/ at gitCommit is unchanged from bf1954f. No purchase or redemption has been recorded against this deployment yet.",
+  "compiler": {
+    "version": "0.8.24+commit.e11b9ed9",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "viaIR": false,
+    "metadataBytecodeHash": "ipfs"
+  },
+  "baseline": {
+    "repository": "https://github.com/notaxyz/contracts",
+    "deploymentRecord": "deployments/arbitrum-one.json",
+    "gitCommit": "c6dd503",
+    "note": "The receipt store, registry, and USDC pre-exist this repository and were not redeployed. This store is the attestReceipt build: it adds attestReceipt and ReceiptAttested over the Base v2 store, at the same address. Its SIGNED_RECEIPT_QUOTE_TYPEHASH matches the Base mainnet store. Zero protocol fee and no fee recipient. Its PurchaseRefRegistry is separate from the Arbitrum One v1 registry 0x6c55B0211cCF687F1505f03a7436302e59564446 and shares no replay protection with it."
+  },
+  "notaReceiptStore": {
+    "address": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "preExisting": true
+  },
+  "purchaseRefRegistry": {
+    "address": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "owner": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+    "preExisting": true
+  },
+  "notaX402Settlement": {
+    "address": "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8",
+    "deployTxHash": "0x3a0a826e2c914b90f789938f26141425615254d4e1a36bb2fa7f6ab2acd4cb22",
+    "deployBlock": 513552214,
+    "deployBlockHash": "0x17bda9b7c74580d0a95df7c3e42107239d43aa4cd7455f3028d6de498a8f2418",
+    "deployedAt": "2026-10-10T15:27:06Z",
+    "status": "success",
+    "deployerNonce": 5,
+    "constructorArgs": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88"
+    ],
+    "store": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "purchaseRefRegistry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "settlementToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    "authorizedInPurchaseRefRegistry": true,
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0x58e6ddafa6b0b9d82605b41abef66ef511e7683ebbc1d94a1cc040e11db977a1",
+    "runtimeCodeHash": "0x85d931ae479d5a17a8970dffe932b8b53a03e638f49d9b13f9f4112c65118372",
+    "arbiscanVerified": true,
+    "verificationUrl": "https://arbiscan.io/address/0x59D3076857972372ecc2E845a7e57A83BB9ddDC8#code"
+  },
+  "registryAuthorization": {
+    "registry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "consumer": "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8",
+    "sender": "0xfc89558d446dD2Ca2DA9B4f36760dC13b3CB3617",
+    "function": "setConsumerAuthorization(address,bool)",
+    "authorized": true,
+    "txHash": "0xe0b9b7bca1980a9c3ea238d37db6cadd345336a21c42084f40155ca7f1a4aa4b",
+    "block": 513552487,
+    "blockHash": "0x2e8fd5de80e7a8eb8df425fefc5ec439f9396a077e02d9b0380007d8a1e71942",
+    "timestamp": "2026-10-10T15:28:23Z",
+    "status": "success",
+    "deployerNonce": 6
+  },
+  "entitlementRedemption": {
+    "address": "0xDE4F712fa5B5be32766C34885b334F1D8e573882",
+    "deployTxHash": "0xd3492e38e6739fe4c0c801802f96772573253be697e051f9e64d6f9353597b7c",
+    "deployBlock": 513552635,
+    "deployBlockHash": "0x1a75a5092eaf7c7332ae9f950c44e8ffaf96b1780cd0fb8ce0d6ee553077f5c0",
+    "deployedAt": "2026-10-10T15:29:06Z",
+    "status": "success",
+    "deployerNonce": 7,
+    "constructorArgs": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+      [
+        "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"
+      ]
+    ],
+    "store": "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+    "purchaseRefRegistry": "0x9AaFfA5787ca332a40B9C98E3e5323A97F96D991",
+    "acceptedConsumers": [
+      "0xf6062F3F52D3E19cb9cc3e027491a5c11D101F88",
+      "0x59D3076857972372ecc2E845a7e57A83BB9ddDC8"
+    ],
+    "creationInputMatchesLocalArtifact": true,
+    "creationInputHash": "0xb815f9520dfebf22b8a7734d396416e33e3135370d87fd51bbd65d27e0cce0d5",
+    "runtimeCodeHash": "0xf81b6f8049945b86a7a36649981a7f477e58c2c39028682cfe610931dda35ec4",
+    "arbiscanVerified": true,
+    "verificationUrl": "https://arbiscan.io/address/0xDE4F712fa5B5be32766C34885b334F1D8e573882#code"
+  },
+  "scope": {
+    "testnet": false,
+    "publicPurchaseAndRedemptionDemoRecorded": false,
+    "subgraphPublished": false,
+    "worldRegistrationVerified": false,
+    "note": "Mainnet deployment. Deployment and source verification are not proof of live application integration, a security audit, fulfillment, or human-backed agent authentication. Registry authorization is a checked snapshot and can be revoked by its owner."
+  }
+}
